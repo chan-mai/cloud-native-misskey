@@ -58,15 +58,21 @@ func rollingZeroDowntime() appsv1.DeploymentStrategy {
 func ptrIntStr(v intstr.IntOrString) *intstr.IntOrString { return &v }
 
 // setDeployment fills a Deployment's fields idempotently for CreateOrUpdate.
-// annotations are stamped on the pod template (e.g. the config checksum) so a
-// config change triggers a rolling update.
+// annotations (e.g. the config checksum) are merged into the pod template so a
+// config change triggers a rolling update without clobbering template
+// annotations added by other tools.
 func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component string, replicas *int32, pod corev1.PodSpec, annotations map[string]string) {
 	dep.Labels = labelsFor(m, component)
 	dep.Spec.Replicas = replicas
 	dep.Spec.Strategy = rollingZeroDowntime()
 	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, component)}
 	dep.Spec.Template.ObjectMeta.Labels = labelsFor(m, component)
-	dep.Spec.Template.ObjectMeta.Annotations = annotations
+	if dep.Spec.Template.Annotations == nil {
+		dep.Spec.Template.Annotations = map[string]string{}
+	}
+	for k, v := range annotations {
+		dep.Spec.Template.Annotations[k] = v
+	}
 	dep.Spec.Template.Spec = pod
 }
 
