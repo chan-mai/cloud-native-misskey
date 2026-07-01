@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +27,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -57,10 +60,37 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	reconcileErr := r.reconcileAll(ctx, &m)
-	if statusErr := r.updateStatus(ctx, &m, reconcileErr); statusErr != nil {
+	ready, statusErr := r.updateStatus(ctx, &m, reconcileErr)
+	if statusErr != nil {
 		logger.Error(statusErr, "failed to update status")
 	}
-	return ctrl.Result{}, reconcileErr
+	if reconcileErr != nil {
+		return ctrl.Result{}, reconcileErr
+	}
+	if !ready {
+		// Pods may still be starting (e.g. waiting on the CNPG app secret to
+		// appear). Requeue so status converges even if no owned event fires.
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+// assessReady reports whether the app is serving, from the app Deployment's
+// available replicas. This keeps status from claiming Running before pods are up.
+func (r *MisskeyReconciler) assessReady(ctx context.Context, m *misskeyv1alpha1.Misskey) (bool, string, string) {
+	dep := &appsv1.Deployment{}
+	if err := r.Get(ctx, types.NamespacedName{Name: nameApp(m), Namespace: m.Namespace}, dep); err != nil {
+		return false, "Pending", "app Deployment not created yet"
+	}
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	msg := fmt.Sprintf("%d/%d app replicas available", dep.Status.AvailableReplicas, desired)
+	if dep.Status.AvailableReplicas >= desired {
+		return true, "Available", msg
+	}
+	return false, "Progressing", msg
 }
 
 // reconcileAll materializes every child resource in dependency order.
@@ -115,32 +145,44 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 	return nil
 }
 
-// updateStatus reflects the reconcile outcome on the Misskey status subresource.
-func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1.Misskey, reconcileErr error) error {
+// updateStatus reflects the reconcile outcome and the app's actual health on the
+// Misskey status subresource. It returns whether the instance is Ready.
+func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1.Misskey, reconcileErr error) (bool, error) {
 	cur := &misskeyv1alpha1.Misskey{}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(m), cur); err != nil {
-		return client.IgnoreNotFound(err)
+		return false, client.IgnoreNotFound(err)
 	}
 
+	ready, reason, message := r.assessReady(ctx, cur)
 	cond := metav1.Condition{
 		Type:               "Ready",
 		ObservedGeneration: cur.Generation,
 		LastTransitionTime: metav1.Now(),
 	}
-	if reconcileErr != nil {
+	switch {
+	case reconcileErr != nil:
+		ready = false
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "ReconcileError"
 		cond.Message = reconcileErr.Error()
 		cur.Status.Phase = "Error"
-	} else {
+	case ready:
 		cond.Status = metav1.ConditionTrue
-		cond.Reason = "Reconciled"
-		cond.Message = "All components reconciled"
+		cond.Reason = reason
+		cond.Message = message
 		cur.Status.Phase = "Running"
+	default:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = reason
+		cond.Message = message
+		cur.Status.Phase = "Progressing"
 	}
 	apimeta.SetStatusCondition(&cur.Status.Conditions, cond)
 	cur.Status.ObservedGeneration = cur.Generation
-	return r.Status().Update(ctx, cur)
+	if err := r.Status().Update(ctx, cur); err != nil {
+		return ready, err
+	}
+	return ready, nil
 }
 
 // SetupWithManager wires the controller and the resources it owns.
