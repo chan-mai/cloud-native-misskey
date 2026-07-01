@@ -137,6 +137,14 @@ type ProxySpec struct {
 	// +optional
 	Maintenance MaintenanceSpec `json:"maintenance,omitempty"`
 
+	// ClientIPHeader, when set, makes the proxy derive the client IP from the
+	// named request header (e.g. CF-Connecting-IP behind Cloudflare) and forward
+	// it as X-Real-IP and X-Forwarded-For. When empty (default) the proxy passes
+	// through the standard X-Forwarded-For from the upstream (e.g. an nginx
+	// ingress), which is what most setups need for correct client IPs.
+	// +optional
+	ClientIPHeader string `json:"clientIPHeader,omitempty"`
+
 	// Resources for the proxy container.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`

@@ -93,8 +93,12 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	w("\tencode gzip\n")
 	w("\theader /assets Cache-Control \"public, max-age=31536000, immutable\"\n\n")
 	w(fmt.Sprintf("\treverse_proxy %s:%d {\n", nameApp(m), misskeyPort))
-	w("\t\theader_up X-Real-IP {header.CF-Connecting-IP}\n")
-	w("\t\theader_up X-Forwarded-For {header.CF-Connecting-IP}\n")
+	// Only override the client-IP headers when an explicit source header is
+	// configured (e.g. Cloudflare). Otherwise pass the upstream's through.
+	if h := m.Spec.Proxy.ClientIPHeader; h != "" {
+		w(fmt.Sprintf("\t\theader_up X-Real-IP {header.%s}\n", h))
+		w(fmt.Sprintf("\t\theader_up X-Forwarded-For {header.%s}\n", h))
+	}
 	w("\t\theader_up X-Forwarded-Proto {scheme}\n")
 	w("\t\theader_up X-Forwarded-Host {host}\n\n")
 	w("\t\thealth_uri /api/server-info\n")
