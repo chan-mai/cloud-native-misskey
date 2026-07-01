@@ -42,12 +42,15 @@ func rollingZeroDowntime() appsv1.DeploymentStrategy {
 func ptrIntStr(v intstr.IntOrString) *intstr.IntOrString { return &v }
 
 // setDeployment fills a Deployment's fields idempotently for CreateOrUpdate.
-func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component string, replicas *int32, pod corev1.PodSpec) {
+// annotations are stamped on the pod template (e.g. the config checksum) so a
+// config change triggers a rolling update.
+func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component string, replicas *int32, pod corev1.PodSpec, annotations map[string]string) {
 	dep.Labels = labelsFor(m, component)
 	dep.Spec.Replicas = replicas
 	dep.Spec.Strategy = rollingZeroDowntime()
 	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, component)}
 	dep.Spec.Template.ObjectMeta.Labels = labelsFor(m, component)
+	dep.Spec.Template.ObjectMeta.Annotations = annotations
 	dep.Spec.Template.Spec = pod
 }
 
@@ -70,7 +73,7 @@ func (r *MisskeyReconciler) reconcileApp(ctx context.Context, m *misskeyv1alpha1
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameApp(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleApp, m.Spec.App)
-		setDeployment(dep, m, roleApp, replicasOr(m.Spec.App.Replicas, 1), pod)
+		setDeployment(dep, m, roleApp, replicasOr(m.Spec.App.Replicas, 1), pod, checksumAnnotation(renderDefaultYML(m, p)))
 		return nil
 	})
 }
@@ -80,7 +83,7 @@ func (r *MisskeyReconciler) reconcileWorker(ctx context.Context, m *misskeyv1alp
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameWorker(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleWorker, m.Spec.Worker)
-		setDeployment(dep, m, roleWorker, replicasOr(m.Spec.Worker.Replicas, 1), pod)
+		setDeployment(dep, m, roleWorker, replicasOr(m.Spec.Worker.Replicas, 1), pod, checksumAnnotation(renderDefaultYML(m, p)))
 		return nil
 	})
 }

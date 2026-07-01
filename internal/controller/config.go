@@ -158,6 +158,16 @@ func defaultMaintenanceHTML(reloadSeconds int32) string {
 `
 }
 
+// maintenanceHTMLContent returns the maintenance page body: the user override
+// when set, else the built-in page with the configured auto-reload interval.
+func maintenanceHTMLContent(m *misskeyv1alpha1.Misskey) string {
+	reload := int32(30)
+	if r := m.Spec.Proxy.Maintenance.ReloadSeconds; r != nil {
+		reload = *r
+	}
+	return stringOr(m.Spec.Proxy.Maintenance.HTML, defaultMaintenanceHTML(reload))
+}
+
 // reconcileConfigMaps creates/updates the config ConfigMap (default.yml +
 // Caddyfiles) and, when the proxy is enabled, the maintenance HTML ConfigMap.
 func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
@@ -179,15 +189,11 @@ func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv
 	if !boolOr(m.Spec.Proxy.Enabled, true) || !boolOr(m.Spec.Proxy.Maintenance.Enabled, true) {
 		return nil
 	}
-	reload := int32(30)
-	if r := m.Spec.Proxy.Maintenance.ReloadSeconds; r != nil {
-		reload = *r
-	}
 	html := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenanceHTML(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, html, func() error {
 		html.Labels = labelsFor(m, "maintenance")
 		html.Data = map[string]string{
-			"maintenance.html": stringOr(m.Spec.Proxy.Maintenance.HTML, defaultMaintenanceHTML(reload)),
+			"maintenance.html": maintenanceHTMLContent(m),
 		}
 		return nil
 	})

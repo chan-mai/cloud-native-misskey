@@ -17,12 +17,30 @@ limitations under the License.
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
+
+// configChecksumAnnotation carries a hash of the rendered config a workload
+// consumes. Stamping it on the pod template makes a config change roll the pods,
+// since the ConfigMap alone is read only at pod start.
+const configChecksumAnnotation = "cloudnative-misskey.dev/config-checksum"
+
+// checksumAnnotation returns the pod-template annotation for the given config parts.
+func checksumAnnotation(parts ...string) map[string]string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return map[string]string{configChecksumAnnotation: hex.EncodeToString(h.Sum(nil))}
+}
 
 // Well-known port numbers used across the instance.
 const (

@@ -113,7 +113,7 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 	pdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameProxy(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, pdep, func() error {
 		pod := buildCaddyPodSpec(m, "Caddyfile", false)
-		setDeployment(pdep, m, "proxy", replicasOr(m.Spec.Proxy.Replicas, 2), pod)
+		setDeployment(pdep, m, "proxy", replicasOr(m.Spec.Proxy.Replicas, 2), pod, checksumAnnotation(renderCaddyfile(m)))
 		return nil
 	}); err != nil {
 		return err
@@ -141,7 +141,7 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 	mdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, mdep, func() error {
 		pod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true)
-		setDeployment(mdep, m, "maintenance", int32Ptr(1), pod)
+		setDeployment(mdep, m, "maintenance", int32Ptr(1), pod, checksumAnnotation(renderMaintenanceCaddyfile(), maintenanceHTMLContent(m)))
 		return nil
 	})
 }
