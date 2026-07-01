@@ -102,11 +102,9 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 	cluster.SetGroupVersionKind(cnpgClusterGVK)
 	cluster.SetName(nameDB(m))
 	cluster.SetNamespace(m.Namespace)
-	if err := r.apply(ctx, m, cluster, func() error {
-		cluster.SetLabels(labelsFor(m, "postgres"))
-		cluster.Object["spec"] = spec
-		return nil
-	}); err != nil {
+	cluster.SetLabels(labelsFor(m, "postgres"))
+	cluster.Object["spec"] = spec
+	if err := r.applySSA(ctx, m, cluster); err != nil {
 		return err
 	}
 
@@ -118,13 +116,11 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 	sb.SetGroupVersionKind(cnpgScheduledBackupGVK)
 	sb.SetName(nameDB(m))
 	sb.SetNamespace(m.Namespace)
-	return r.apply(ctx, m, sb, func() error {
-		sb.SetLabels(labelsFor(m, "postgres"))
-		sb.Object["spec"] = map[string]any{
-			"schedule":             pg.Backup.Schedule,
-			"backupOwnerReference": "self",
-			"cluster":              map[string]any{"name": nameDB(m)},
-		}
-		return nil
-	})
+	sb.SetLabels(labelsFor(m, "postgres"))
+	sb.Object["spec"] = map[string]any{
+		"schedule":             pg.Backup.Schedule,
+		"backupOwnerReference": "self",
+		"cluster":              map[string]any{"name": nameDB(m)},
+	}
+	return r.applySSA(ctx, m, sb)
 }

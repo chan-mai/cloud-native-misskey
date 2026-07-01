@@ -226,6 +226,17 @@ func (r *MisskeyReconciler) reconcileSetupSecret(ctx context.Context, m *misskey
 	})
 }
 
+// applySSA server-side-applies obj with this controller as the field manager.
+// Unlike apply's read-modify-write full replace, SSA merges only the fields we
+// set and leaves fields owned by the target's own controller intact (e.g. the
+// defaults CNPG's webhook adds to a Cluster), avoiding churn on every resync.
+func (r *MisskeyReconciler) applySSA(ctx context.Context, m *misskeyv1alpha1.Misskey, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(m, obj, r.Scheme); err != nil {
+		return err
+	}
+	return r.Patch(ctx, obj, client.Apply, client.FieldOwner("cloud-native-misskey"), client.ForceOwnership)
+}
+
 // apply is a thin CreateOrUpdate wrapper that also stamps the controller owner
 // reference so children are garbage-collected with the Misskey object.
 func (r *MisskeyReconciler) apply(ctx context.Context, m *misskeyv1alpha1.Misskey, obj client.Object, mutate func() error) error {
