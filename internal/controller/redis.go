@@ -44,6 +44,7 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 
 	image := stringOr(m.Spec.Redis.Image, "redis:7-alpine")
 	maxMem := stringOr(m.Spec.Redis.MaxMemory, "400mb")
+	policy := stringOr(m.Spec.Redis.MaxMemoryPolicy, "noeviction")
 	storage := quantityOr(m.Spec.Redis.Storage, "2Gi")
 
 	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: nameRedis(m), Namespace: m.Namespace}}
@@ -62,7 +63,7 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 					Args: []string{
 						"redis-server",
 						"--maxmemory", maxMem,
-						"--maxmemory-policy", "allkeys-lru",
+						"--maxmemory-policy", policy,
 					},
 					SecurityContext: restrictedContainerSecurityContext(),
 					Resources:       m.Spec.Redis.Resources,

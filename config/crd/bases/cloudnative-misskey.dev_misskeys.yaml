@@ -622,8 +622,14 @@ spec:
                     type: string
                   maxMemory:
                     default: 400mb
-                    description: MaxMemory passes --maxmemory to redis-server (allkeys-lru
-                      eviction).
+                    description: MaxMemory passes --maxmemory to redis-server.
+                    type: string
+                  maxMemoryPolicy:
+                    default: noeviction
+                    description: |-
+                      MaxMemoryPolicy sets --maxmemory-policy. Default noeviction, because this
+                      Redis also backs the job queue (BullMQ) and an eviction policy such as
+                      allkeys-lru would silently drop queued/delayed jobs under memory pressure.
                     type: string
                   resources:
                     description: Resources for the managed Redis container.

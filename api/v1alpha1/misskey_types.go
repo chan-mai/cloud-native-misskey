@@ -208,10 +208,17 @@ type RedisSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// MaxMemory passes --maxmemory to redis-server (allkeys-lru eviction).
+	// MaxMemory passes --maxmemory to redis-server.
 	// +kubebuilder:default="400mb"
 	// +optional
 	MaxMemory string `json:"maxMemory,omitempty"`
+
+	// MaxMemoryPolicy sets --maxmemory-policy. Default noeviction, because this
+	// Redis also backs the job queue (BullMQ) and an eviction policy such as
+	// allkeys-lru would silently drop queued/delayed jobs under memory pressure.
+	// +kubebuilder:default=noeviction
+	// +optional
+	MaxMemoryPolicy string `json:"maxMemoryPolicy,omitempty"`
 
 	// Storage size of the managed Redis PVC.
 	// +kubebuilder:default="2Gi"
