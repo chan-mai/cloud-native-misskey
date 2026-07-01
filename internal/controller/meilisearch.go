@@ -117,7 +117,9 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 						InitialDelaySeconds: 15,
 						PeriodSeconds:       20,
 					},
-					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/meili_data"}},
+					// subPath keeps the data out of the volume root, where an ext4
+					// lost+found dir would make MeiliSearch fail to infer its DB version.
+					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/meili_data", SubPath: "data"}},
 				},
 			},
 		}
