@@ -41,6 +41,17 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 	pg := m.Spec.Postgres
 	storageSize := quantityOr(pg.Storage, "20Gi")
 
+	initdb := map[string]any{
+		"database": stringOr(pg.Database, "misskey"),
+		"owner":    stringOr(pg.Owner, "misskey"),
+	}
+	// For PGroonga full-text search, create the extension in the application
+	// database at init. This needs a PGroonga-enabled image via postgres.imageName;
+	// with the default image CNPG bootstrap fails loudly instead of silently.
+	if m.Spec.Search.Provider == misskeyv1alpha1.SearchSQLPgroonga {
+		initdb["postInitApplicationSQL"] = []any{"CREATE EXTENSION IF NOT EXISTS pgroonga"}
+	}
+
 	spec := map[string]any{
 		"instances": int64(int32OrDefault(pg.Instances, 1)),
 		"imageName": stringOr(pg.ImageName, "ghcr.io/cloudnative-pg/postgresql:17"),
@@ -48,10 +59,7 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 			"size": storageSize.String(),
 		},
 		"bootstrap": map[string]any{
-			"initdb": map[string]any{
-				"database": stringOr(pg.Database, "misskey"),
-				"owner":    stringOr(pg.Owner, "misskey"),
-			},
+			"initdb": initdb,
 		},
 	}
 
