@@ -104,13 +104,25 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	w("\t}\n")
 
 	if boolOr(m.Spec.Proxy.Maintenance.Enabled, true) {
+		status := int32(200)
+		if sc := m.Spec.Proxy.Maintenance.StatusCode; sc != nil {
+			status = *sc
+		}
 		w("\n\thandle_errors {\n")
 		w("\t\t@backend_down `{err.status_code} in [500, 501, 502, 503, 504, 522]`\n")
 		w("\t\thandle @backend_down {\n")
-		w(fmt.Sprintf("\t\t\treverse_proxy %s:%d {\n", nameMaintenance(m), proxyPort))
-		w("\t\t\t\thandle_response {\n")
-		w("\t\t\t\t\tcopy_response_headers\n")
-		w("\t\t\t\t\tcopy_response 503\n")
+		// /api/* is excluded from the maintenance page so external health checks
+		// see the real backend status instead of a 2xx maintenance response.
+		w("\t\t\t@api path /api/*\n")
+		w("\t\t\thandle @api {\n")
+		w("\t\t\t\trespond \"\" {err.status_code}\n")
+		w("\t\t\t}\n")
+		w("\t\t\thandle {\n")
+		w(fmt.Sprintf("\t\t\t\treverse_proxy %s:%d {\n", nameMaintenance(m), proxyPort))
+		w("\t\t\t\t\thandle_response {\n")
+		w("\t\t\t\t\t\tcopy_response_headers\n")
+		w(fmt.Sprintf("\t\t\t\t\t\tcopy_response %d\n", status))
+		w("\t\t\t\t\t}\n")
 		w("\t\t\t\t}\n")
 		w("\t\t\t}\n")
 		w("\t\t}\n")
@@ -125,18 +137,26 @@ func renderMaintenanceCaddyfile() string {
 	return fmt.Sprintf(":%d {\n\troot * /usr/share/caddy\n\ttry_files /maintenance.html\n\tfile_server\n\theader Cache-Control \"no-store\"\n}\n", proxyPort)
 }
 
-// defaultMaintenanceHTML is served when spec.proxy.maintenance.html is empty.
-const defaultMaintenanceHTML = `<!doctype html>
+// defaultMaintenanceHTML builds the page served when spec.proxy.maintenance.html
+// is empty. When reloadSeconds > 0 it embeds a script that reloads the page so
+// visitors return automatically once the backend is healthy again.
+func defaultMaintenanceHTML(reloadSeconds int32) string {
+	reload := ""
+	if reloadSeconds > 0 {
+		reload = fmt.Sprintf("\n<script>setTimeout(function () { location.reload() }, %d)</script>", reloadSeconds*1000)
+	}
+	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Under maintenance</title>
+<title>Under maintenance</title>` + reload + `
 <style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f5f5f7;color:#333}main{text-align:center}</style>
 </head>
 <body><main><h1>Under maintenance</h1><p>This server is temporarily unavailable. Please try again shortly.</p></main></body>
 </html>
 `
+}
 
 // reconcileConfigMaps creates/updates the config ConfigMap (default.yml +
 // Caddyfiles) and, when the proxy is enabled, the maintenance HTML ConfigMap.
@@ -159,11 +179,15 @@ func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv
 	if !boolOr(m.Spec.Proxy.Enabled, true) || !boolOr(m.Spec.Proxy.Maintenance.Enabled, true) {
 		return nil
 	}
+	reload := int32(30)
+	if r := m.Spec.Proxy.Maintenance.ReloadSeconds; r != nil {
+		reload = *r
+	}
 	html := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenanceHTML(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, html, func() error {
 		html.Labels = labelsFor(m, "maintenance")
 		html.Data = map[string]string{
-			"maintenance.html": stringOr(m.Spec.Proxy.Maintenance.HTML, defaultMaintenanceHTML),
+			"maintenance.html": stringOr(m.Spec.Proxy.Maintenance.HTML, defaultMaintenanceHTML(reload)),
 		}
 		return nil
 	})

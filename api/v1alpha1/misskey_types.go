@@ -152,6 +152,24 @@ type MaintenanceSpec struct {
 	// HTML is the page body served during maintenance. A default is used when empty.
 	// +optional
 	HTML string `json:"html,omitempty"`
+
+	// StatusCode is the HTTP status returned for the maintenance page. Default 200
+	// so the page renders as a normal 2xx response. Set to 503 for the standard
+	// "temporarily unavailable" semantics. Note that /api/* is always excluded
+	// from the maintenance page and returns the real backend status so external
+	// health checks are not masked.
+	// +kubebuilder:default=200
+	// +kubebuilder:validation:Minimum=100
+	// +kubebuilder:validation:Maximum=599
+	// +optional
+	StatusCode *int32 `json:"statusCode,omitempty"`
+
+	// ReloadSeconds sets the auto-reload interval of the built-in maintenance
+	// page, in seconds. 0 disables auto-reload. Ignored when a custom html is set.
+	// +kubebuilder:default=30
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	ReloadSeconds *int32 `json:"reloadSeconds,omitempty"`
 }
 
 // IngressSpec configures the Ingress exposing the instance.

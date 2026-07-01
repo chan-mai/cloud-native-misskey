@@ -487,6 +487,26 @@ spec:
                         description: HTML is the page body served during maintenance.
                           A default is used when empty.
                         type: string
+                      reloadSeconds:
+                        default: 30
+                        description: |-
+                          ReloadSeconds sets the auto-reload interval of the built-in maintenance
+                          page, in seconds. 0 disables auto-reload. Ignored when a custom html is set.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      statusCode:
+                        default: 200
+                        description: |-
+                          StatusCode is the HTTP status returned for the maintenance page. Default 200
+                          so the page renders as a normal 2xx response. Set to 503 for the standard
+                          "temporarily unavailable" semantics. Note that /api/* is always excluded
+                          from the maintenance page and returns the real backend status so external
+                          health checks are not masked.
+                        format: int32
+                        maximum: 599
+                        minimum: 100
+                        type: integer
                     type: object
                   replicas:
                     description: Replicas of the proxy Deployment.
