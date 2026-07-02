@@ -86,6 +86,10 @@ func (r *MisskeyReconciler) assessReady(ctx context.Context, m *misskeyv1alpha1.
 	if dep.Spec.Replicas != nil {
 		desired = *dep.Spec.Replicas
 	}
+	// replicas=0は意図的停止。Ready扱いにしない
+	if desired == 0 {
+		return false, "Stopped", "app scaled to 0"
+	}
 	msg := fmt.Sprintf("%d/%d app replicas available", dep.Status.AvailableReplicas, desired)
 	if dep.Status.AvailableReplicas >= desired {
 		return true, "Available", msg
