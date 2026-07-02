@@ -21,7 +21,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
@@ -47,8 +49,14 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 	policy := stringOr(m.Spec.Redis.MaxMemoryPolicy, "noeviction")
 	storage := quantityOr(m.Spec.Redis.Storage, "2Gi")
 
+	// キュー(BullMQ)耐久化のためAOFを既定有効
+	args := []string{"redis-server", "--maxmemory", maxMem, "--maxmemory-policy", policy}
+	if boolOr(m.Spec.Redis.AppendOnly, true) {
+		args = append(args, "--appendonly", "yes")
+	}
+
 	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: nameRedis(m), Namespace: m.Namespace}}
-	return r.apply(ctx, m, sts, func() error {
+	if err := r.apply(ctx, m, sts, func() error {
 		sts.Labels = labelsFor(m, "redis")
 		sts.Spec.ServiceName = nameRedis(m)
 		sts.Spec.Replicas = int32Ptr(1)
@@ -58,13 +66,9 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 			SecurityContext: nonRootPodSecurityContext(redisUID),
 			Containers: []corev1.Container{
 				{
-					Name:  "redis",
-					Image: image,
-					Args: []string{
-						"redis-server",
-						"--maxmemory", maxMem,
-						"--maxmemory-policy", policy,
-					},
+					Name:            "redis",
+					Image:           image,
+					Args:            args,
 					SecurityContext: restrictedContainerSecurityContext(),
 					Resources:       resourcesOr(m.Spec.Redis.Resources, "50m", "128Mi", "512Mi"),
 					Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
@@ -84,6 +88,32 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 				},
 			},
 		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return r.reconcileRedisNetworkPolicy(ctx, m)
+}
+
+// managed Redisへのingressをapp/workerに限るNetworkPolicyを作成/更新
+// CNIが強制する場合のみ有効
+func (r *MisskeyReconciler) reconcileRedisNetworkPolicy(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	if !boolOr(m.Spec.Redis.NetworkPolicy, true) {
+		return nil
+	}
+	port := intstr.FromInt32(redisPort)
+	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: nameRedis(m), Namespace: m.Namespace}}
+	return r.apply(ctx, m, np, func() error {
+		np.Labels = labelsFor(m, "redis")
+		np.Spec.PodSelector = metav1.LabelSelector{MatchLabels: selectorFor(m, "redis")}
+		np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+		np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{
+			From: []networkingv1.NetworkPolicyPeer{
+				{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleApp)}},
+				{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleWorker)}},
+			},
+			Ports: []networkingv1.NetworkPolicyPort{{Port: &port}},
+		}}
 		return nil
 	})
 }

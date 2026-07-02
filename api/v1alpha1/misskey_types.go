@@ -227,6 +227,19 @@ type RedisSpec struct {
 	// +optional
 	MaxMemoryPolicy string `json:"maxMemoryPolicy,omitempty"`
 
+	// AppendOnly enables Redis AOF (--appendonly yes) for job-queue durability
+	// across restarts. Default true; set false for pure-cache use.
+	// +kubebuilder:default=true
+	// +optional
+	AppendOnly *bool `json:"appendOnly,omitempty"`
+
+	// NetworkPolicy toggles a NetworkPolicy that limits ingress to the managed
+	// Redis to app and worker pods. Default true. Only effective on CNIs that
+	// enforce NetworkPolicy.
+	// +kubebuilder:default=true
+	// +optional
+	NetworkPolicy *bool `json:"networkPolicy,omitempty"`
+
 	// Storage size of the managed Redis PVC.
 	// +kubebuilder:default="2Gi"
 	// +optional

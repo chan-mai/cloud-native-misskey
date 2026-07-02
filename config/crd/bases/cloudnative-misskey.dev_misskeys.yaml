@@ -583,6 +583,12 @@ spec:
                 description: Redis configures the Redis backend (managed StatefulSet
                   or external).
                 properties:
+                  appendOnly:
+                    default: true
+                    description: |-
+                      AppendOnly enables Redis AOF (--appendonly yes) for job-queue durability
+                      across restarts. Default true; set false for pure-cache use.
+                    type: boolean
                   external:
                     description: External points Misskey at an existing Redis. When
                       set, no Redis is managed.
@@ -638,6 +644,13 @@ spec:
                       Redis also backs the job queue (BullMQ) and an eviction policy such as
                       allkeys-lru would silently drop queued/delayed jobs under memory pressure.
                     type: string
+                  networkPolicy:
+                    default: true
+                    description: |-
+                      NetworkPolicy toggles a NetworkPolicy that limits ingress to the managed
+                      Redis to app and worker pods. Default true. Only effective on CNIs that
+                      enforce NetworkPolicy.
+                    type: boolean
                   resources:
                     description: Resources for the managed Redis container.
                     properties:
