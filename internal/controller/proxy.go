@@ -29,7 +29,7 @@ import (
 
 // proxyとmaintenance Deployment共通のpod specを生成
 // Caddyは非rootで動くため、バイナリを書込可能なemptyDirにコピーし/dataと/configもemptyDirにする
-func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMaintenanceHTML bool) corev1.PodSpec {
+func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMaintenanceHTML bool, component string) corev1.PodSpec {
 	image := stringOr(m.Spec.Proxy.Image, "caddy:2")
 
 	volumes := []corev1.Volume{
@@ -66,7 +66,8 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 	}
 
 	return corev1.PodSpec{
-		SecurityContext: nonRootPodSecurityContext(genericNonRootUID),
+		SecurityContext:           nonRootPodSecurityContext(genericNonRootUID),
+		TopologySpreadConstraints: spreadConstraints(labelsFor(m, component)),
 		InitContainers: []corev1.Container{
 			{
 				Name:            "prepare-caddy",
@@ -110,7 +111,7 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 
 	pdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameProxy(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, pdep, func() error {
-		pod := buildCaddyPodSpec(m, "Caddyfile", false)
+		pod := buildCaddyPodSpec(m, "Caddyfile", false, "proxy")
 		setDeployment(pdep, m, "proxy", replicasOr(m.Spec.Proxy.Replicas, 2), pod, checksumAnnotation(renderCaddyfile(m)))
 		return nil
 	}); err != nil {
@@ -141,7 +142,7 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 
 	mdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, mdep, func() error {
-		pod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true)
+		pod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true, "maintenance")
 		setDeployment(mdep, m, "maintenance", int32Ptr(1), pod, checksumAnnotation(renderMaintenanceCaddyfile(), maintenanceHTMLContent(m)))
 		return nil
 	})
