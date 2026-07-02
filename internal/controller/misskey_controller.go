@@ -35,7 +35,7 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// MisskeyReconciler reconciles a Misskey object.
+// Misskeyオブジェクトをreconcileする
 type MisskeyReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -50,7 +50,7 @@ type MisskeyReconciler struct {
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters;scheduledbackups,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile drives the Misskey instance toward its desired state.
+// Misskeyインスタンスを望ましい状態へ収束させる
 func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -68,15 +68,15 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, reconcileErr
 	}
 	if !ready {
-		// Pods may still be starting (e.g. waiting on the CNPG app secret to
-		// appear). Requeue so status converges even if no owned event fires.
+		// podが起動途中の可能性(例: CNPGのapp secret出現待ち)
+		// 所有イベントが発火しなくてもstatusが収束するようrequeue
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }
 
-// assessReady reports whether the app is serving, from the app Deployment's
-// available replicas. This keeps status from claiming Running before pods are up.
+// app Deploymentのavailableレプリカ数からappが提供中かを判定
+// pod起動前にstatusがRunningを主張するのを防ぐ
 func (r *MisskeyReconciler) assessReady(ctx context.Context, m *misskeyv1alpha1.Misskey) (bool, string, string) {
 	dep := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: nameApp(m), Namespace: m.Namespace}, dep); err != nil {
@@ -93,11 +93,11 @@ func (r *MisskeyReconciler) assessReady(ctx context.Context, m *misskeyv1alpha1.
 	return false, "Progressing", msg
 }
 
-// reconcileAll materializes every child resource in dependency order.
+// 全子リソースを依存順に生成
 func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	p := resolve(m)
 
-	// The plan references these secrets, so ensure them before the pods.
+	// planがこれらのsecretを参照するため、pod前に用意
 	if p.meiliManaged {
 		if err := r.reconcileMeiliSecret(ctx, m); err != nil {
 			return err
@@ -145,8 +145,8 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 	return nil
 }
 
-// updateStatus reflects the reconcile outcome and the app's actual health on the
-// Misskey status subresource. It returns whether the instance is Ready.
+// reconcile結果とappの実ヘルスをMisskeyのstatusサブリソースに反映
+// インスタンスがReadyかを返す
 func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1.Misskey, reconcileErr error) (bool, error) {
 	cur := &misskeyv1alpha1.Misskey{}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(m), cur); err != nil {
@@ -185,7 +185,7 @@ func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1
 	return ready, nil
 }
 
-// SetupWithManager wires the controller and the resources it owns.
+// コントローラと所有リソースを結線
 func (r *MisskeyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&misskeyv1alpha1.Misskey{}).

@@ -26,9 +26,8 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// ingressAnnotations merges a class-specific default with the user's annotations
-// (user wins). For nginx it raises proxy-body-size, whose 1MB default would
-// otherwise reject media uploads.
+// クラス固有の既定値とユーザのannotationをマージ(ユーザ優先)
+// nginxではproxy-body-sizeを引き上げる。既定1MBだとメディアアップロードが弾かれるため
 func ingressAnnotations(m *misskeyv1alpha1.Misskey, className string) map[string]string {
 	out := map[string]string{}
 	if strings.Contains(className, "nginx") {
@@ -43,10 +42,9 @@ func ingressAnnotations(m *misskeyv1alpha1.Misskey, className string) map[string
 	return out
 }
 
-// reconcileIngress creates/updates the Ingress routing the public host to the
-// proxy (or directly to the app when the proxy is disabled).
+// 公開ホストをproxy(プロキシ無効時はapp直)へルーティングするIngressを作成/更新
 func (r *MisskeyReconciler) reconcileIngress(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
-	// Target the proxy when enabled, else the app directly.
+	// 有効時はproxy、そうでなければapp直を対象
 	backendName := nameProxy(m)
 	var backendPort int32 = 80
 	if !boolOr(m.Spec.Proxy.Enabled, true) {

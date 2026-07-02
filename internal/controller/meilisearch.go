@@ -29,7 +29,7 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// randomHex returns a cryptographically-random hex string of n bytes.
+// nバイトの暗号学的乱数hex文字列を返す
 func randomHex(n int) (string, error) {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
@@ -38,12 +38,11 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-// reconcileMeiliSecret ensures the operator-managed master key Secret exists.
-// It is created only when MeiliSearch is managed and the user did not supply
-// their own master key. The generated key is never overwritten once set.
+// operator管理のマスターキーSecretの存在を保証
+// MeiliSearchがmanagedかつユーザがマスターキー未指定の時のみ作成。生成後のキーは上書きしない
 func (r *MisskeyReconciler) reconcileMeiliSecret(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	if m.Spec.Search.Meilisearch.MasterKeySecret != nil {
-		return nil // user manages the key
+		return nil // キーはユーザが管理
 	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameMeili(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, secret, func() error {
@@ -62,7 +61,7 @@ func (r *MisskeyReconciler) reconcileMeiliSecret(ctx context.Context, m *misskey
 	})
 }
 
-// reconcileMeilisearch creates/updates the MeiliSearch Service and StatefulSet.
+// MeiliSearchのServiceとStatefulSetを作成/更新
 func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameMeili(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, svc, func() error {
@@ -117,8 +116,8 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 						InitialDelaySeconds: 15,
 						PeriodSeconds:       20,
 					},
-					// subPath keeps the data out of the volume root, where an ext4
-					// lost+found dir would make MeiliSearch fail to infer its DB version.
+					// subPathでデータをvolumeルート外に置く
+					// volumeルートにext4のlost+foundがあるとMeiliSearchがDBバージョンを推定できず失敗するため
 					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/meili_data", SubPath: "data"}},
 				},
 			},

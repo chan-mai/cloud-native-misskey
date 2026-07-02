@@ -35,8 +35,8 @@ var (
 	}
 )
 
-// reconcilePostgres creates/updates the CNPG Cluster (and ScheduledBackup) for a
-// managed database. It is a no-op when spec.postgres.external is set.
+// managedデータベース用にCNPG Cluster(とScheduledBackup)を作成/更新
+// spec.postgres.external設定時はno-op
 func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	pg := m.Spec.Postgres
 	storageSize := quantityOr(pg.Storage, "20Gi")
@@ -45,9 +45,8 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 		"database": stringOr(pg.Database, "misskey"),
 		"owner":    stringOr(pg.Owner, "misskey"),
 	}
-	// For PGroonga full-text search, create the extension in the application
-	// database at init. This needs a PGroonga-enabled image via postgres.imageName;
-	// with the default image CNPG bootstrap fails loudly instead of silently.
+	// PGroonga全文検索では、init時にアプリケーションDBへ拡張を作成
+	// postgres.imageNameでPGroonga有効イメージが必要。既定イメージだとCNPGのbootstrapが黙らず明示的に失敗する
 	if m.Spec.Search.Provider == misskeyv1alpha1.SearchSQLPgroonga {
 		initdb["postInitApplicationSQL"] = []any{"CREATE EXTENSION IF NOT EXISTS pgroonga"}
 	}
@@ -116,7 +115,7 @@ func (r *MisskeyReconciler) reconcilePostgres(ctx context.Context, m *misskeyv1a
 		return err
 	}
 
-	// Optional scheduled backup.
+	// 任意のスケジュールバックアップ
 	if pg.Backup == nil || pg.Backup.Schedule == "" {
 		return nil
 	}

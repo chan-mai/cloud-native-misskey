@@ -57,14 +57,14 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"Serve the metrics endpoint over HTTPS with authn/authz. Disable only for trusted local use.")
-	// Production logging by default; pass --zap-devel for verbose dev logs.
+	// 既定は本番ロギング。--zap-develで詳細な開発ログ
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// disableHTTP2 mitigates HTTP/2 vulnerabilities on the webhook/metrics servers.
+	// webhook/metricsサーバのHTTP/2脆弱性を緩和
 	disableHTTP2 := func(c *tls.Config) {
 		c.NextProtos = []string{"http/1.1"}
 	}
@@ -74,7 +74,7 @@ func main() {
 		SecureServing: secureMetrics,
 	}
 	if secureMetrics {
-		// Gate the metrics endpoint behind Kubernetes authn/authz.
+		// metricsエンドポイントをKubernetesのauthn/authzで保護
 		metricsOpts.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 

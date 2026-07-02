@@ -135,7 +135,7 @@ func TestResolveProviderSQLLike(t *testing.T) {
 }
 
 func TestResolveSetupPassword(t *testing.T) {
-	// managed (generated)
+	// managed(生成)
 	m := newMisskey()
 	m.Spec.SetupPassword = &misskeyv1alpha1.SetupPasswordSpec{}
 	p := resolve(m)
@@ -143,7 +143,7 @@ func TestResolveSetupPassword(t *testing.T) {
 		t.Errorf("managed setup password wrong: %+v", p.setupSel)
 	}
 
-	// external secretRef
+	// external secretRefの場合
 	m2 := newMisskey()
 	m2.Spec.SetupPassword = &misskeyv1alpha1.SetupPasswordSpec{
 		SecretRef: &corev1.SecretKeySelector{
@@ -181,7 +181,7 @@ func TestRenderDefaultYMLMeilisearch(t *testing.T) {
 			t.Errorf("default.yml missing %q\n---\n%s", s, out)
 		}
 	}
-	// Secrets stay as placeholders; no real value should ever be rendered here.
+	// シークレットはプレースホルダのまま。実値は描画されない
 	if strings.Contains(out, "MEILI_MASTER_KEY") {
 		t.Errorf("default.yml unexpectedly contains a secret key name")
 	}
@@ -207,18 +207,18 @@ func TestRenderCaddyfileDefaults(t *testing.T) {
 		"health_uri /api/server-info",
 		"@api path /api/*",
 		`respond "" {err.status_code}`,
-		"copy_response 200", // maintenance default status
+		"copy_response 200", // メンテナンスの既定ステータス
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("Caddyfile missing %q\n---\n%s", s, out)
 		}
 	}
-	// Fix5: X-Forwarded-Proto must not be overwritten with {scheme}.
+	// Fix5: X-Forwarded-Protoを{scheme}で上書きしない
 	if strings.Contains(out, "X-Forwarded-Proto") {
 		t.Errorf("Caddyfile should not set X-Forwarded-Proto:\n%s", out)
 	}
-	// Fix4: no client-IP override unless a source header is configured.
+	// Fix4: ソースヘッダ未設定ならクライアントIPを上書きしない
 	if strings.Contains(out, "X-Real-IP") {
 		t.Errorf("Caddyfile should not set X-Real-IP by default:\n%s", out)
 	}
@@ -255,8 +255,7 @@ func TestMaintenanceHTMLReload(t *testing.T) {
 }
 
 func TestRenderConfigScriptIsLiteral(t *testing.T) {
-	// Fix1: the render step must do literal replacement (split/join), never sed,
-	// so arbitrary characters in secret values cannot break or inject.
+	// Fix1: render段はsedでなくリテラル置換(split/join)を使い、シークレット値中の任意文字が壊れ・インジェクションを起こさないようにする
 	if !strings.Contains(renderConfigScript, ".split(") || !strings.Contains(renderConfigScript, ".join(") {
 		t.Errorf("render script must use literal split/join replacement")
 	}

@@ -30,9 +30,8 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// renderDefaultYML builds the Misskey .config/default.yml. Secrets are left as
-// ${PLACEHOLDER} tokens; an init container substitutes them at pod start so no
-// secret value ever lands in a ConfigMap.
+// Misskeyの.config/default.ymlを生成。シークレットは${PLACEHOLDER}トークンのまま残す
+// initコンテナがpod起動時に置換するため、シークレット値がConfigMapに載らない
 func renderDefaultYML(m *misskeyv1alpha1.Misskey, p plan) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
@@ -84,7 +83,7 @@ func renderDefaultYML(m *misskeyv1alpha1.Misskey, p plan) string {
 	return b.String()
 }
 
-// renderCaddyfile builds the reverse-proxy Caddyfile fronting the app.
+// appの前段に置くリバースプロキシのCaddyfileを生成
 func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	var b strings.Builder
 	w := func(s string) { b.WriteString(s) }
@@ -93,15 +92,14 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	w("\tencode gzip\n")
 	w("\theader /assets Cache-Control \"public, max-age=31536000, immutable\"\n\n")
 	w(fmt.Sprintf("\treverse_proxy %s:%d {\n", nameApp(m), misskeyPort))
-	// Only override the client-IP headers when an explicit source header is
-	// configured (e.g. Cloudflare). Otherwise pass the upstream's through.
+	// 明示的なソースヘッダ(例: Cloudflare)が設定された時のみクライアントIPヘッダを上書き
+	// それ以外はupstreamのものをそのまま通す
 	if h := m.Spec.Proxy.ClientIPHeader; h != "" {
 		w(fmt.Sprintf("\t\theader_up X-Real-IP {header.%s}\n", h))
 		w(fmt.Sprintf("\t\theader_up X-Forwarded-For {header.%s}\n", h))
 	}
-	// Do not overwrite X-Forwarded-Proto with {scheme}: TLS terminates upstream
-	// so {scheme} here is http, which would clobber the https the ingress set.
-	// Caddy passes the upstream's X-Forwarded-Proto through by default.
+	// X-Forwarded-Protoを{scheme}で上書きしない。TLSはupstreamで終端するため{scheme}はhttpになり、ingressが設定したhttpsを潰す
+	// Caddyは既定でupstreamのX-Forwarded-Protoをそのまま通す
 	w("\t\theader_up X-Forwarded-Host {host}\n\n")
 	w("\t\thealth_uri /api/server-info\n")
 	w("\t\thealth_interval 10s\n")
@@ -117,8 +115,7 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 		w("\n\thandle_errors {\n")
 		w("\t\t@backend_down `{err.status_code} in [500, 501, 502, 503, 504, 522]`\n")
 		w("\t\thandle @backend_down {\n")
-		// /api/* is excluded from the maintenance page so external health checks
-		// see the real backend status instead of a 2xx maintenance response.
+		// /api/*はメンテナンスページから除外し、外部ヘルスチェックが2xxのメンテ応答でなく実際のバックエンドステータスを見られるようにする
 		w("\t\t\t@api path /api/*\n")
 		w("\t\t\thandle @api {\n")
 		w("\t\t\t\trespond \"\" {err.status_code}\n")
@@ -138,14 +135,13 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	return b.String()
 }
 
-// renderMaintenanceCaddyfile builds the static maintenance server config.
+// 静的メンテナンスサーバのCaddyfileを生成
 func renderMaintenanceCaddyfile() string {
 	return fmt.Sprintf(":%d {\n\troot * /usr/share/caddy\n\ttry_files /maintenance.html\n\tfile_server\n\theader Cache-Control \"no-store\"\n}\n", proxyPort)
 }
 
-// defaultMaintenanceHTML builds the page served when spec.proxy.maintenance.html
-// is empty. When reloadSeconds > 0 it embeds a script that reloads the page so
-// visitors return automatically once the backend is healthy again.
+// spec.proxy.maintenance.htmlが空の時に配信するページを生成
+// reloadSeconds>0ならページ再読込スクリプトを埋め込み、バックエンド復帰後に訪問者が自動で戻る
 func defaultMaintenanceHTML(reloadSeconds int32) string {
 	reload := ""
 	if reloadSeconds > 0 {
@@ -164,8 +160,7 @@ func defaultMaintenanceHTML(reloadSeconds int32) string {
 `
 }
 
-// maintenanceHTMLContent returns the maintenance page body: the user override
-// when set, else the built-in page with the configured auto-reload interval.
+// メンテナンスページ本文を返す。ユーザ指定があればそれ、なければ設定した自動再読込間隔の組込みページ
 func maintenanceHTMLContent(m *misskeyv1alpha1.Misskey) string {
 	reload := int32(30)
 	if r := m.Spec.Proxy.Maintenance.ReloadSeconds; r != nil {
@@ -174,8 +169,7 @@ func maintenanceHTMLContent(m *misskeyv1alpha1.Misskey) string {
 	return stringOr(m.Spec.Proxy.Maintenance.HTML, defaultMaintenanceHTML(reload))
 }
 
-// reconcileConfigMaps creates/updates the config ConfigMap (default.yml +
-// Caddyfiles) and, when the proxy is enabled, the maintenance HTML ConfigMap.
+// config ConfigMap(default.yml + Caddyfile)を作成/更新し、プロキシ有効時はメンテナンスHTMLのConfigMapも扱う
 func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: nameConfig(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, cm, func() error {
@@ -205,9 +199,8 @@ func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv
 	})
 }
 
-// reconcileSetupSecret ensures the operator-managed setup-password Secret
-// exists. It is created only when spec.setupPassword is present without a
-// secretRef. The generated password is never overwritten once set.
+// operator管理のsetupパスワードSecretの存在を保証
+// spec.setupPasswordがありsecretRefがない時のみ作成。生成後のパスワードは上書きしない
 func (r *MisskeyReconciler) reconcileSetupSecret(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameSetup(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, secret, func() error {
@@ -226,10 +219,8 @@ func (r *MisskeyReconciler) reconcileSetupSecret(ctx context.Context, m *misskey
 	})
 }
 
-// applySSA server-side-applies obj with this controller as the field manager.
-// Unlike apply's read-modify-write full replace, SSA merges only the fields we
-// set and leaves fields owned by the target's own controller intact (e.g. the
-// defaults CNPG's webhook adds to a Cluster), avoiding churn on every resync.
+// このコントローラをfield managerとしてobjをserver-side apply
+// applyのread-modify-write全置換と違い、SSAは設定したフィールドのみマージし対象コントローラ所有のフィールドは保持(例: CNPGのwebhookがClusterに付与する既定値)。resync毎の差分を防ぐ
 func (r *MisskeyReconciler) applySSA(ctx context.Context, m *misskeyv1alpha1.Misskey, obj client.Object) error {
 	if err := controllerutil.SetControllerReference(m, obj, r.Scheme); err != nil {
 		return err
@@ -237,8 +228,7 @@ func (r *MisskeyReconciler) applySSA(ctx context.Context, m *misskeyv1alpha1.Mis
 	return r.Patch(ctx, obj, client.Apply, client.FieldOwner("cloud-native-misskey"), client.ForceOwnership)
 }
 
-// apply is a thin CreateOrUpdate wrapper that also stamps the controller owner
-// reference so children are garbage-collected with the Misskey object.
+// controller owner referenceも刻む薄いCreateOrUpdateラッパ。子はMisskeyオブジェクトと共にGCされる
 func (r *MisskeyReconciler) apply(ctx context.Context, m *misskeyv1alpha1.Misskey, obj client.Object, mutate func() error) error {
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, obj, func() error {
 		if err := mutate(); err != nil {

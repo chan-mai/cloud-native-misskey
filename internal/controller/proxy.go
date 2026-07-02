@@ -27,9 +27,8 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// buildCaddyPodSpec builds the pod spec shared by the proxy and maintenance
-// Deployments. Caddy runs non-root, so the binary is copied into a writable
-// emptyDir and /data + /config are emptyDirs.
+// proxyとmaintenance Deployment共通のpod specを生成
+// Caddyは非rootで動くため、バイナリを書込可能なemptyDirにコピーし/dataと/configもemptyDirにする
 func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMaintenanceHTML bool) corev1.PodSpec {
 	image := stringOr(m.Spec.Proxy.Image, "caddy:2")
 
@@ -92,10 +91,9 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 	}
 }
 
-// reconcileProxy creates/updates the proxy Service+Deployment and, when enabled,
-// the maintenance Service+Deployment.
+// proxyのService+Deploymentを作成/更新し、有効時はmaintenanceのService+Deploymentも扱う
 func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
-	// proxy Service (port 80 -> 8080)
+	// proxy Service(port 80 -> 8080)
 	psvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameProxy(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, psvc, func() error {
 		psvc.Labels = labelsFor(m, "proxy")
@@ -126,7 +124,7 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 		return nil
 	}
 
-	// maintenance Service (port 8080 -> 8080)
+	// maintenance Service(port 8080 -> 8080)
 	msvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, msvc, func() error {
 		msvc.Labels = labelsFor(m, "maintenance")

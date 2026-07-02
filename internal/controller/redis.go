@@ -26,10 +26,10 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// redisUID is the uid the official redis image runs as.
+// 公式redisイメージが動作するuid
 const redisUID = 999
 
-// reconcileRedis creates/updates the managed Redis Service and StatefulSet.
+// managed RedisのServiceとStatefulSetを作成/更新
 func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameRedis(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, svc, func() error {

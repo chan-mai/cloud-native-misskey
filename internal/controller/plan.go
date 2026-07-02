@@ -25,8 +25,8 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// plan holds the resolved connection parameters for one instance. It flattens
-// the "managed vs external" branches so the builders don't have to.
+// 1インスタンス分の解決済み接続パラメータを保持
+// managed/externalの分岐を平坦化し、ビルダー側で分岐不要にする
 type plan struct {
 	// Postgres
 	dbManaged bool
@@ -42,7 +42,7 @@ type plan struct {
 	redisPort    int32
 	redisPassSel *corev1.SecretKeySelector
 
-	// MeiliSearch / search
+	// MeiliSearch/検索
 	provider     misskeyv1alpha1.SearchProvider
 	meiliEnabled bool // provider == meilisearch
 	meiliManaged bool
@@ -56,13 +56,13 @@ type plan struct {
 	// Ingress
 	ingressHost string
 
-	// Setup password
+	// setupパスワード
 	setupEnabled bool
-	setupManaged bool // operator generates the Secret
+	setupManaged bool // operatorがSecretを生成
 	setupSel     corev1.SecretKeySelector
 }
 
-// resolve flattens the spec into a plan, applying defaults.
+// specを既定値適用の上でplanに平坦化
 func resolve(m *misskeyv1alpha1.Misskey) plan {
 	p := plan{}
 
@@ -80,7 +80,7 @@ func resolve(m *misskeyv1alpha1.Misskey) plan {
 		p.dbPort = postgresPort
 		p.dbName = stringOr(m.Spec.Postgres.Database, "misskey")
 		p.dbUser = stringOr(m.Spec.Postgres.Owner, "misskey")
-		// CNPG generates the app secret <cluster>-app with keys username/password.
+		// CNPGがapp secret <cluster>-appをusername/passwordキーで生成
 		p.dbPassSel = corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: nameDBAppSecret(m)},
 			Key:                  "password",
@@ -148,7 +148,7 @@ func resolve(m *misskeyv1alpha1.Misskey) plan {
 	return p
 }
 
-// int32OrDefault returns v or def when v is zero.
+// vがゼロならdef、そうでなければvを返す
 func int32OrDefault(v, def int32) int32 {
 	if v == 0 {
 		return def
@@ -156,11 +156,11 @@ func int32OrDefault(v, def int32) int32 {
 	return v
 }
 
-// hostFromURL extracts the host component from a URL, tolerating bad input.
+// URLからホスト部を抽出。不正入力も許容
 func hostFromURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		// Fall back to a best-effort strip of scheme and path.
+		// scheme/pathをbest-effortで除去してフォールバック
 		s := strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
 		if i := strings.IndexAny(s, "/:"); i >= 0 {
 			s = s[:i]
@@ -170,8 +170,7 @@ func hostFromURL(raw string) string {
 	return u.Hostname()
 }
 
-// sanitizeIndex converts a host into a MeiliSearch-safe index name (alphanumeric,
-// hyphen, underscore only).
+// ホストをMeiliSearchで安全なインデックス名に変換(英数字・ハイフン・アンダースコアのみ)
 func sanitizeIndex(host string) string {
 	var b strings.Builder
 	for _, r := range host {

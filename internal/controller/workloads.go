@@ -28,10 +28,8 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// reconcilePDB ensures a PodDisruptionBudget for a component so a node drain
-// cannot take all replicas at once, which the zero-downtime rollout strategy
-// otherwise implies but does not guarantee. maxUnavailable=1 still lets a
-// single-replica component be drained.
+// コンポーネントのPodDisruptionBudgetを保証し、ノードdrainで全レプリカが一度に落ちないようにする
+// zero-downtimeロールアウト戦略が暗に前提とするが保証しない点を担保。maxUnavailable=1なら単一レプリカのコンポーネントもdrain可能
 func (r *MisskeyReconciler) reconcilePDB(ctx context.Context, m *misskeyv1alpha1.Misskey, component string) error {
 	pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metav1.ObjectMeta{Name: m.Name + "-" + component, Namespace: m.Namespace}}
 	return r.apply(ctx, m, pdb, func() error {
@@ -43,8 +41,7 @@ func (r *MisskeyReconciler) reconcilePDB(ctx context.Context, m *misskeyv1alpha1
 	})
 }
 
-// rollingZeroDowntime is the shared surge/unavailable policy: never drop below
-// the desired count, add at most one extra pod.
+// 共通のsurge/unavailableポリシー。desired数を下回らず、追加podは最大1つ
 func rollingZeroDowntime() appsv1.DeploymentStrategy {
 	return appsv1.DeploymentStrategy{
 		Type: appsv1.RollingUpdateDeploymentStrategyType,
@@ -57,10 +54,8 @@ func rollingZeroDowntime() appsv1.DeploymentStrategy {
 
 func ptrIntStr(v intstr.IntOrString) *intstr.IntOrString { return &v }
 
-// setDeployment fills a Deployment's fields idempotently for CreateOrUpdate.
-// annotations (e.g. the config checksum) are merged into the pod template so a
-// config change triggers a rolling update without clobbering template
-// annotations added by other tools.
+// CreateOrUpdate用にDeploymentのフィールドを冪等に埋める
+// annotation(例: configチェックサム)はpodテンプレートにマージし、他ツールが付与したテンプレートannotationを潰さずconfig変更でローリング更新を起こす
 func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component string, replicas *int32, pod corev1.PodSpec, annotations map[string]string) {
 	dep.Labels = labelsFor(m, component)
 	dep.Spec.Replicas = replicas
@@ -76,7 +71,7 @@ func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component
 	dep.Spec.Template.Spec = pod
 }
 
-// reconcileApp creates/updates the app Service and Deployment.
+// appのServiceとDeploymentを作成/更新
 func (r *MisskeyReconciler) reconcileApp(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameApp(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, svc, func() error {
@@ -103,7 +98,7 @@ func (r *MisskeyReconciler) reconcileApp(ctx context.Context, m *misskeyv1alpha1
 	return r.reconcilePDB(ctx, m, roleApp)
 }
 
-// reconcileWorker creates/updates the worker Deployment.
+// workerのDeploymentを作成/更新
 func (r *MisskeyReconciler) reconcileWorker(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameWorker(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, dep, func() error {

@@ -27,12 +27,12 @@ const (
 	roleApp    = "app"
 	roleWorker = "worker"
 
-	// misskeyUID is the uid the official Misskey image runs as (USER misskey).
-	// Matching it keeps /misskey files and the built emptyDir writable.
+	// 公式Misskeyイメージが動作するuid(USER misskey)
+	// 合わせることで/misskeyファイルとbuiltのemptyDirを書込可能に保つ
 	misskeyUID = 991
 )
 
-// secretEnv builds an EnvVar sourced from a secret key.
+// secretキー由来のEnvVarを生成
 func secretEnv(name string, sel corev1.SecretKeySelector) corev1.EnvVar {
 	s := sel
 	return corev1.EnvVar{
@@ -41,8 +41,7 @@ func secretEnv(name string, sel corev1.SecretKeySelector) corev1.EnvVar {
 	}
 }
 
-// renderInitEnv returns the env vars the render-config init container needs to
-// substitute the ${...} placeholders in default.yml.
+// render-config initコンテナがdefault.ymlの${...}プレースホルダ置換に必要なenv varを返す
 func renderInitEnv(p plan) []corev1.EnvVar {
 	env := []corev1.EnvVar{secretEnv("DB_PASSWORD", p.dbPassSel)}
 	if p.meiliEnabled {
@@ -57,12 +56,9 @@ func renderInitEnv(p plan) []corev1.EnvVar {
 	return env
 }
 
-// renderConfigScript is a Node.js program that expands the ${...} secret
-// placeholders in default.yml by literal string replacement. Using
-// String.split(literal).join(value) avoids the regex and shell interpretation
-// that made the previous sed pipeline break (or allow injection) on values
-// containing |, &, \, $ or newlines. The Misskey image ships Node, so no extra
-// tooling image is needed.
+// default.ymlの${...}シークレットプレースホルダをリテラル文字列置換で展開するNode.jsプログラム
+// String.split(literal).join(value)により、|, &, \, $, 改行を含む値で以前のsedパイプラインが壊れる(またはインジェクションを許す)原因の正規表現・シェル解釈を回避
+// MisskeyイメージにNode同梱のため追加のツールイメージは不要
 const renderConfigScript = `const fs = require('fs');
 let s = fs.readFileSync('/tpl/default.yml', 'utf8');
 for (const k of ['DB_PASSWORD', 'MEILI_KEY', 'REDIS_PASSWORD', 'SETUP_PASSWORD']) {
@@ -71,7 +67,7 @@ for (const k of ['DB_PASSWORD', 'MEILI_KEY', 'REDIS_PASSWORD', 'SETUP_PASSWORD']
 }
 fs.writeFileSync('/shared/default.yml', s);`
 
-// httpProbe builds an HTTP GET probe against the Misskey server port.
+// MisskeyサーバポートへのHTTP GET probeを生成
 func httpProbe(path string, period, timeout, failure int32) *corev1.Probe {
 	return &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
@@ -83,7 +79,7 @@ func httpProbe(path string, period, timeout, failure int32) *corev1.Probe {
 	}
 }
 
-// buildMisskeyPodSpec builds the shared PodSpec for the app and worker roles.
+// app/workerロール共通のPodSpecを生成
 func buildMisskeyPodSpec(m *misskeyv1alpha1.Misskey, p plan, role string, comp misskeyv1alpha1.ComponentSpec) corev1.PodSpec {
 	env := []corev1.EnvVar{
 		{Name: "COREPACK_INTEGRITY_KEYS", Value: "0"},
@@ -121,12 +117,12 @@ func buildMisskeyPodSpec(m *misskeyv1alpha1.Misskey, p plan, role string, comp m
 			{Name: "built-volume", MountPath: "/misskey/built"},
 		},
 	}
-	// The app serves HTTP, so gate readiness and restart on Misskey's health
-	// endpoint. startupProbe absorbs a slow first boot (DB migrations). The
-	// worker is queue-only with no listener and no Service, so it gets no probe.
+	// appはHTTPを提供するため、readinessと再起動をMisskeyのヘルスエンドポイントで制御
+	// startupProbeが遅い初回起動(DBマイグレーション)を吸収
+	// workerはキュー専用でリスナもServiceもないためprobeなし
 	if role == roleApp {
 		const healthPath = "/api/server-info"
-		mainContainer.StartupProbe = httpProbe(healthPath, 10, 3, 30) // up to ~300s to boot
+		mainContainer.StartupProbe = httpProbe(healthPath, 10, 3, 30) // 起動まで最大~300s
 		mainContainer.ReadinessProbe = httpProbe(healthPath, 10, 3, 3)
 		mainContainer.LivenessProbe = httpProbe(healthPath, 20, 5, 3)
 	}
@@ -139,7 +135,7 @@ func buildMisskeyPodSpec(m *misskeyv1alpha1.Misskey, p plan, role string, comp m
 		Tolerations:               comp.Tolerations,
 		InitContainers: []corev1.Container{
 			{
-				// Copy built/ into a writable emptyDir; Misskey may write there at boot.
+				// built/を書込可能なemptyDirにコピー。Misskeyが起動時に書き込む場合あり
 				Name:            "prepare-built",
 				Image:           m.Spec.Image,
 				Command:         []string{"sh", "-c", "cp -r /misskey/built/. /tmp/built/"},
@@ -149,9 +145,7 @@ func buildMisskeyPodSpec(m *misskeyv1alpha1.Misskey, p plan, role string, comp m
 				},
 			},
 			{
-				// Expand ${...} secret placeholders in default.yml at pod start,
-				// via literal replacement (no shell, no regex) so arbitrary
-				// characters in secret values cannot break or inject.
+				// pod起動時にdefault.ymlの${...}シークレットプレースホルダをリテラル置換(シェル・正規表現なし)で展開し、シークレット値中の任意文字が壊れ・インジェクションを起こさないようにする
 				Name:            "render-config",
 				Image:           m.Spec.Image,
 				Command:         []string{"node", "-e", renderConfigScript},

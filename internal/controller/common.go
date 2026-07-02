@@ -27,12 +27,11 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
 
-// configChecksumAnnotation carries a hash of the rendered config a workload
-// consumes. Stamping it on the pod template makes a config change roll the pods,
-// since the ConfigMap alone is read only at pod start.
+// ワークロードが参照する描画済みconfigのハッシュを保持
+// podテンプレートに刻みconfig変更でpodをローリング。ConfigMap単体はpod起動時のみ読み込みのため
 const configChecksumAnnotation = "cloudnative-misskey.dev/config-checksum"
 
-// checksumAnnotation returns the pod-template annotation for the given config parts.
+// 指定configパーツのpodテンプレートannotationを返す
 func checksumAnnotation(parts ...string) map[string]string {
 	h := sha256.New()
 	for _, p := range parts {
@@ -42,7 +41,7 @@ func checksumAnnotation(parts ...string) map[string]string {
 	return map[string]string{configChecksumAnnotation: hex.EncodeToString(h.Sum(nil))}
 }
 
-// Well-known port numbers used across the instance.
+// インスタンス全体で使う既知のポート番号
 const (
 	misskeyPort      = 3000
 	proxyPort        = 8080
@@ -52,13 +51,12 @@ const (
 	meiliMasterKeyID = "MEILI_MASTER_KEY"
 	setupPasswordID  = "SETUP_PASSWORD"
 
-	// genericNonRootUID is a non-root uid for workloads whose static-binary image
-	// does not depend on the image's own file ownership (Caddy, MeiliSearch).
-	// App/worker instead run as the Misskey image's real uid.
+	// 静的バイナリでイメージ自身のファイル所有権に依存しないワークロード用の非rootのuid(Caddy, MeiliSearch)
+	// app/workerはMisskeyイメージの実uidで動作
 	genericNonRootUID = 1000
 )
 
-// labelsFor returns the standard label set for a component of an instance.
+// インスタンスの1コンポーネント用の標準ラベルセットを返す
 func labelsFor(m *misskeyv1alpha1.Misskey, component string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       "misskey",
@@ -68,8 +66,8 @@ func labelsFor(m *misskeyv1alpha1.Misskey, component string) map[string]string {
 	}
 }
 
-// selectorFor returns a minimal, immutable label selector for a component.
-// Kept smaller than labelsFor so labels can evolve without breaking selectors.
+// コンポーネント用の最小・不変なラベルセレクタを返す
+// labelsForより小さく保ち、ラベル変更でセレクタが壊れないようにする
 func selectorFor(m *misskeyv1alpha1.Misskey, component string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/instance":  m.Name,
@@ -77,7 +75,7 @@ func selectorFor(m *misskeyv1alpha1.Misskey, component string) map[string]string
 	}
 }
 
-// Child object names, all derived deterministically from the instance name.
+// 子オブジェクト名。すべてインスタンス名から決定的に導出
 func nameApp(m *misskeyv1alpha1.Misskey) string             { return m.Name + "-app" }
 func nameWorker(m *misskeyv1alpha1.Misskey) string          { return m.Name + "-worker" }
 func nameProxy(m *misskeyv1alpha1.Misskey) string           { return m.Name + "-proxy" }
@@ -89,22 +87,22 @@ func nameConfig(m *misskeyv1alpha1.Misskey) string          { return m.Name + "-
 func nameMaintenanceHTML(m *misskeyv1alpha1.Misskey) string { return m.Name + "-maintenance-html" }
 func nameSetup(m *misskeyv1alpha1.Misskey) string           { return m.Name + "-setup" }
 
-// nameDBService is the CNPG-generated read-write service for the cluster.
+// CNPGが生成するクラスタのread-writeサービス
 func nameDBService(m *misskeyv1alpha1.Misskey) string { return nameDB(m) + "-rw" }
 
-// nameDBAppSecret is the CNPG-generated app credentials secret for the cluster.
+// CNPGが生成するクラスタのアプリ認証情報Secret
 func nameDBAppSecret(m *misskeyv1alpha1.Misskey) string { return nameDB(m) + "-app" }
 
-// int32Ptr returns a pointer to v.
+// vへのポインタを返す
 func int32Ptr(v int32) *int32 { return &v }
 
-// int64Ptr returns a pointer to v.
+// vへのポインタを返す
 func int64Ptr(v int64) *int64 { return &v }
 
-// boolPtr returns a pointer to v.
+// vへのポインタを返す
 func boolPtr(v bool) *bool { return &v }
 
-// replicasOr returns *p or def when p is nil.
+// pがnilならdef、そうでなければ*pを返す
 func replicasOr(p *int32, def int32) *int32 {
 	if p == nil {
 		return int32Ptr(def)
@@ -112,7 +110,7 @@ func replicasOr(p *int32, def int32) *int32 {
 	return p
 }
 
-// boolOr returns *p or def when p is nil.
+// pがnilならdef、そうでなければ*pを返す
 func boolOr(p *bool, def bool) bool {
 	if p == nil {
 		return def
@@ -120,7 +118,7 @@ func boolOr(p *bool, def bool) bool {
 	return *p
 }
 
-// stringOr returns s or def when s is empty.
+// sが空ならdef、そうでなければsを返す
 func stringOr(s, def string) string {
 	if s == "" {
 		return def
@@ -128,7 +126,7 @@ func stringOr(s, def string) string {
 	return s
 }
 
-// quantityOr returns q or the parsed def when q is zero.
+// qがゼロならdefをパースした値、そうでなければqを返す
 func quantityOr(q resource.Quantity, def string) resource.Quantity {
 	if q.IsZero() {
 		return resource.MustParse(def)
@@ -136,8 +134,8 @@ func quantityOr(q resource.Quantity, def string) resource.Quantity {
 	return q
 }
 
-// resourcesOr returns r when the user set any request/limit, else a default set.
-// Managed components get a floor so an omitted resources block is not BestEffort.
+// request/limitが1つでも設定済みならr、なければ既定値を返す
+// 管理コンポーネントに下限を与え、resources省略時にBestEffortにしない
 func resourcesOr(r corev1.ResourceRequirements, reqCPU, reqMem, limMem string) corev1.ResourceRequirements {
 	if len(r.Requests) > 0 || len(r.Limits) > 0 {
 		return r
@@ -153,8 +151,7 @@ func resourcesOr(r corev1.ResourceRequirements, reqCPU, reqMem, limMem string) c
 	}
 }
 
-// nonRootPodSecurityContext is the hardened pod-level security context reused by
-// every workload the operator manages.
+// operatorが管理する全ワークロードで再利用する堅牢なpodレベルsecurityContext
 func nonRootPodSecurityContext(uid int64) *corev1.PodSecurityContext {
 	return &corev1.PodSecurityContext{
 		RunAsNonRoot:   boolPtr(true),
@@ -164,7 +161,7 @@ func nonRootPodSecurityContext(uid int64) *corev1.PodSecurityContext {
 	}
 }
 
-// restrictedContainerSecurityContext is the hardened container-level context.
+// 堅牢なcontainerレベルのsecurityContext
 func restrictedContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: boolPtr(false),
@@ -172,7 +169,7 @@ func restrictedContainerSecurityContext() *corev1.SecurityContext {
 	}
 }
 
-// spreadConstraints keeps replicas best-effort spread across nodes.
+// レプリカをノード間にbest-effortで分散
 func spreadConstraints(matchLabels map[string]string) []corev1.TopologySpreadConstraint {
 	return []corev1.TopologySpreadConstraint{
 		{
