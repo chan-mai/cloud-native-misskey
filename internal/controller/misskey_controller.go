@@ -79,41 +79,74 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// app Deploymentのavailableレプリカ数からappが提供中かを判定
-// pod起動前にstatusがRunningを主張するのを防ぐ
-func (r *MisskeyReconciler) assessReady(ctx context.Context, m *misskeyv1alpha1.Misskey) (bool, string, string) {
+// deploymentReady: Deploymentのavailable>=desiredでcondition判定(desired=0はStopped)
+func (r *MisskeyReconciler) deploymentReady(ctx context.Context, m *misskeyv1alpha1.Misskey, name string) (metav1.ConditionStatus, string, string) {
 	dep := &appsv1.Deployment{}
-	if err := r.Get(ctx, types.NamespacedName{Name: nameApp(m), Namespace: m.Namespace}, dep); err != nil {
-		return false, "Pending", "app Deployment not created yet"
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, dep); err != nil {
+		return metav1.ConditionFalse, "NotCreated", "Deployment未作成"
 	}
 	desired := int32(1)
 	if dep.Spec.Replicas != nil {
 		desired = *dep.Spec.Replicas
 	}
-	// replicas=0は意図的停止。Ready扱いにしない
 	if desired == 0 {
-		return false, "Stopped", "app scaled to 0"
+		return metav1.ConditionFalse, "Stopped", "replicas=0"
 	}
-	msg := fmt.Sprintf("%d/%d app replicas available", dep.Status.AvailableReplicas, desired)
+	msg := fmt.Sprintf("%d/%d available", dep.Status.AvailableReplicas, desired)
 	if dep.Status.AvailableReplicas >= desired {
-		return true, "Available", msg
+		return metav1.ConditionTrue, "Available", msg
 	}
-	return false, "Progressing", msg
+	return metav1.ConditionFalse, "Progressing", msg
 }
 
-// databaseReady: managed CNPGのstatus.readyInstances>=spec.instances、external=true
-func (r *MisskeyReconciler) databaseReady(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) bool {
+// databaseCondition: managed CNPGのreadyInstances判定、external=True
+func (r *MisskeyReconciler) databaseCondition(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) (metav1.ConditionStatus, string, string) {
 	if !p.dbManaged {
-		return true
+		return metav1.ConditionTrue, "External", "外部DB"
 	}
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(cnpgClusterGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: nameDB(m), Namespace: m.Namespace}, cluster); err != nil {
-		return false
+		return metav1.ConditionFalse, "Pending", "CNPG Cluster未作成"
 	}
 	ready, _, _ := unstructured.NestedInt64(cluster.Object, "status", "readyInstances")
 	desired := int64(int32OrDefault(m.Spec.Postgres.Instances, 1))
-	return desired > 0 && ready >= desired
+	msg := fmt.Sprintf("%d/%d instances ready", ready, desired)
+	if desired > 0 && ready >= desired {
+		return metav1.ConditionTrue, "Ready", msg
+	}
+	return metav1.ConditionFalse, "Progressing", msg
+}
+
+// migrationCondition: 現行migration Jobの状態
+func (r *MisskeyReconciler) migrationCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
+	job := &batchv1.Job{}
+	if err := r.Get(ctx, types.NamespacedName{Name: nameMigrate(m), Namespace: m.Namespace}, job); err != nil {
+		return metav1.ConditionFalse, "Pending", "migration Job未作成"
+	}
+	switch {
+	case job.Status.Succeeded >= 1:
+		return metav1.ConditionTrue, "Complete", "migration完了"
+	case job.Status.Failed >= 1:
+		return metav1.ConditionFalse, "Failed", fmt.Sprintf("migration Job失敗 (%d)", job.Status.Failed)
+	default:
+		return metav1.ConditionFalse, "Running", "migration実行中"
+	}
+}
+
+// ingressCondition: Ingress存在で判定(外部LBアドレスはcontroller依存なので見ない)
+func (r *MisskeyReconciler) ingressCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
+	ing := &networkingv1.Ingress{}
+	if err := r.Get(ctx, types.NamespacedName{Name: m.Name, Namespace: m.Namespace}, ing); err != nil {
+		return metav1.ConditionFalse, "Pending", "Ingress未作成"
+	}
+	return metav1.ConditionTrue, "Created", "Ingress生成済み"
+}
+
+// databaseReady: gate用。databaseConditionがTrueか
+func (r *MisskeyReconciler) databaseReady(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) bool {
+	st, _, _ := r.databaseCondition(ctx, m, p)
+	return st == metav1.ConditionTrue
 }
 
 // 全子リソースを依存順に生成
@@ -183,20 +216,61 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 // reconcile結果とappの実ヘルスをMisskeyのstatusサブリソースに反映
 // インスタンスがReadyかを返す
 func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1.Misskey, reconcileErr error) (bool, error) {
-	ready, reason, message := r.assessReady(ctx, m)
-	condStatus := metav1.ConditionTrue
+	p := resolve(m)
+	type cnd struct {
+		typ             string
+		status          metav1.ConditionStatus
+		reason, message string
+	}
+	var set []cnd
+	var remove []string
+
+	dbSt, dbR, dbM := r.databaseCondition(ctx, m, p)
+	set = append(set, cnd{"DatabaseReady", dbSt, dbR, dbM})
+	mSt, mR, mM := r.migrationCondition(ctx, m)
+	set = append(set, cnd{"MigrationComplete", mSt, mR, mM})
+	aSt, aR, aM := r.deploymentReady(ctx, m, nameApp(m))
+	set = append(set, cnd{"AppReady", aSt, aR, aM})
+	wSt, wR, wM := r.deploymentReady(ctx, m, nameWorker(m))
+	set = append(set, cnd{"WorkerReady", wSt, wR, wM})
+	if boolOr(m.Spec.Proxy.Enabled, true) {
+		pSt, pR, pM := r.deploymentReady(ctx, m, nameProxy(m))
+		set = append(set, cnd{"ProxyReady", pSt, pR, pM})
+	} else {
+		remove = append(remove, "ProxyReady")
+	}
+	if boolOr(m.Spec.Ingress.Enabled, true) {
+		iSt, iR, iM := r.ingressCondition(ctx, m)
+		set = append(set, cnd{"IngressReady", iSt, iR, iM})
+	} else {
+		remove = append(remove, "IngressReady")
+	}
+
+	ready := true
+	for _, c := range set {
+		if c.status != metav1.ConditionTrue {
+			ready = false
+		}
+	}
+
+	// 集約Ready
+	readySt := metav1.ConditionTrue
+	readyReason := "Ready"
+	readyMsg := "all subsystems ready"
 	phase := "Running"
 	switch {
 	case reconcileErr != nil:
 		ready = false
-		condStatus = metav1.ConditionFalse
-		reason = "ReconcileError"
-		message = reconcileErr.Error()
+		readySt = metav1.ConditionFalse
+		readyReason = "ReconcileError"
+		readyMsg = reconcileErr.Error()
 		phase = "Error"
 	case ready:
-		phase = "Running"
+		// Running
 	default:
-		condStatus = metav1.ConditionFalse
+		readySt = metav1.ConditionFalse
+		readyReason = "Progressing"
+		readyMsg = "waiting for subsystems"
 		phase = "Progressing"
 	}
 
@@ -206,14 +280,20 @@ func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1
 		if err := r.Get(ctx, client.ObjectKeyFromObject(m), cur); err != nil {
 			return err
 		}
+		now := metav1.Now()
+		for _, c := range set {
+			apimeta.SetStatusCondition(&cur.Status.Conditions, metav1.Condition{
+				Type: c.typ, Status: c.status, Reason: c.reason, Message: c.message,
+				ObservedGeneration: cur.Generation, LastTransitionTime: now,
+			})
+		}
 		apimeta.SetStatusCondition(&cur.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
-			Status:             condStatus,
-			Reason:             reason,
-			Message:            message,
-			ObservedGeneration: cur.Generation,
-			LastTransitionTime: metav1.Now(),
+			Type: "Ready", Status: readySt, Reason: readyReason, Message: readyMsg,
+			ObservedGeneration: cur.Generation, LastTransitionTime: now,
 		})
+		for _, t := range remove {
+			apimeta.RemoveStatusCondition(&cur.Status.Conditions, t)
+		}
 		cur.Status.Phase = phase
 		cur.Status.ObservedGeneration = cur.Generation
 		return r.Status().Update(ctx, cur)
