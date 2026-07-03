@@ -95,6 +95,43 @@ type MisskeySpec struct {
 	// +kubebuilder:default=true
 	// +optional
 	NetworkIsolation *bool `json:"networkIsolation,omitempty"`
+
+	// Tenancy configures namespace-scoped isolation, assuming the namespace is
+	// dedicated to this instance.
+	// +optional
+	Tenancy TenancySpec `json:"tenancy,omitempty"`
+}
+
+// TenancySpec configures namespace-scoped tenant isolation. ResourceQuota and
+// LimitRange are namespace-wide, so they are only created when the namespace is
+// declared dedicated to this instance.
+type TenancySpec struct {
+	// Dedicated declares the namespace is dedicated to this instance, which is
+	// required to manage the namespace-scoped ResourceQuota/LimitRange below.
+	// +optional
+	Dedicated bool `json:"dedicated,omitempty"`
+
+	// Quota, when set with Dedicated, becomes the ResourceQuota spec.hard
+	// (e.g. cpu, memory, requests.cpu, limits.memory, pods).
+	// +optional
+	Quota corev1.ResourceList `json:"quota,omitempty"`
+
+	// LimitRange, when set with Dedicated, creates a Container-scoped LimitRange.
+	// +optional
+	LimitRange *LimitRangeSpec `json:"limitRange,omitempty"`
+}
+
+// LimitRangeSpec is the Container limits applied namespace-wide.
+type LimitRangeSpec struct {
+	// Default container limits.
+	// +optional
+	Default corev1.ResourceList `json:"default,omitempty"`
+	// DefaultRequest container requests.
+	// +optional
+	DefaultRequest corev1.ResourceList `json:"defaultRequest,omitempty"`
+	// Max container limits.
+	// +optional
+	Max corev1.ResourceList `json:"max,omitempty"`
 }
 
 // SetupPasswordSpec configures the Misskey initial-setup password.

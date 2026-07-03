@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,9 +30,15 @@ import (
 
 const instanceLabel = "app.kubernetes.io/instance"
 
-// reconcileTenancy: テナント隔離リソース
+// reconcileTenancy: instance隔離NetworkPolicyと、専用namespace前提のResourceQuota/LimitRange
 func (r *MisskeyReconciler) reconcileTenancy(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
-	return r.reconcileNetworkIsolation(ctx, m)
+	if err := r.reconcileNetworkIsolation(ctx, m); err != nil {
+		return err
+	}
+	if err := r.reconcileResourceQuota(ctx, m); err != nil {
+		return err
+	}
+	return r.reconcileLimitRange(ctx, m)
 }
 
 // reconcileNetworkIsolation: backend podへのingressをintra-instanceに限る
@@ -60,6 +67,38 @@ func (r *MisskeyReconciler) reconcileNetworkIsolation(ctx context.Context, m *mi
 			From: []networkingv1.NetworkPolicyPeer{
 				{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{instanceLabel: m.Name}}},
 			},
+		}}
+		return nil
+	})
+}
+
+// reconcileResourceQuota: dedicated時のみnamespace-wideなResourceQuotaを生成
+func (r *MisskeyReconciler) reconcileResourceQuota(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	rq := &corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: m.Name + "-quota", Namespace: m.Namespace}}
+	if !m.Spec.Tenancy.Dedicated || len(m.Spec.Tenancy.Quota) == 0 {
+		return r.deleteIfExists(ctx, rq)
+	}
+	return r.apply(ctx, m, rq, func() error {
+		rq.Labels = labelsFor(m, "tenancy")
+		rq.Spec.Hard = m.Spec.Tenancy.Quota
+		return nil
+	})
+}
+
+// reconcileLimitRange: dedicated時のみContainer既定/上限のLimitRangeを生成
+func (r *MisskeyReconciler) reconcileLimitRange(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	lr := &corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: m.Name + "-limits", Namespace: m.Namespace}}
+	spec := m.Spec.Tenancy.LimitRange
+	if !m.Spec.Tenancy.Dedicated || spec == nil {
+		return r.deleteIfExists(ctx, lr)
+	}
+	return r.apply(ctx, m, lr, func() error {
+		lr.Labels = labelsFor(m, "tenancy")
+		lr.Spec.Limits = []corev1.LimitRangeItem{{
+			Type:           corev1.LimitTypeContainer,
+			Default:        spec.Default,
+			DefaultRequest: spec.DefaultRequest,
+			Max:            spec.Max,
 		}}
 		return nil
 	})

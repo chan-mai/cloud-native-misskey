@@ -940,6 +940,60 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              tenancy:
+                description: |-
+                  Tenancy configures namespace-scoped isolation, assuming the namespace is
+                  dedicated to this instance.
+                properties:
+                  dedicated:
+                    description: |-
+                      Dedicated declares the namespace is dedicated to this instance, which is
+                      required to manage the namespace-scoped ResourceQuota/LimitRange below.
+                    type: boolean
+                  limitRange:
+                    description: LimitRange, when set with Dedicated, creates a Container-scoped
+                      LimitRange.
+                    properties:
+                      default:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: Default container limits.
+                        type: object
+                      defaultRequest:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: DefaultRequest container requests.
+                        type: object
+                      max:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: Max container limits.
+                        type: object
+                    type: object
+                  quota:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Quota, when set with Dedicated, becomes the ResourceQuota spec.hard
+                      (e.g. cpu, memory, requests.cpu, limits.memory, pods).
+                    type: object
+                type: object
               url:
                 description: |-
                   URL is the public-facing URL of the instance, e.g. https://misskey.example.com/.
