@@ -43,14 +43,24 @@ func (r *MisskeyReconciler) reconcileTenancy(ctx context.Context, m *misskeyv1al
 
 // reconcileNetworkIsolation: backend podへのingressをintra-instanceに限る
 // 公開入口(proxy有効時proxy、無効時app)は開放し、ingress controllerから到達可能に保つ
+// postgresはCNPG operatorのcross-namespaceアクセス(instance manager :8000)が要るため除外
 func (r *MisskeyReconciler) reconcileNetworkIsolation(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: m.Name + "-isolation", Namespace: m.Namespace}}
-	if !boolOr(m.Spec.NetworkIsolation, true) {
+	if !boolOr(m.Spec.NetworkIsolation.Enabled, true) {
 		return r.deleteIfExists(ctx, np)
 	}
 	publicEntry := "proxy"
 	if !boolOr(m.Spec.Proxy.Enabled, true) {
 		publicEntry = roleApp
+	}
+	// intra-instance + 明示allowNamespace(監視等)からのingressを許可
+	from := []networkingv1.NetworkPolicyPeer{
+		{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{instanceLabel: m.Name}}},
+	}
+	for _, ns := range m.Spec.NetworkIsolation.AllowedNamespaces {
+		from = append(from, networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+		})
 	}
 	return r.apply(ctx, m, np, func() error {
 		np.Labels = labelsFor(m, "isolation")
@@ -59,15 +69,11 @@ func (r *MisskeyReconciler) reconcileNetworkIsolation(ctx context.Context, m *mi
 			MatchExpressions: []metav1.LabelSelectorRequirement{{
 				Key:      "app.kubernetes.io/component",
 				Operator: metav1.LabelSelectorOpNotIn,
-				Values:   []string{publicEntry},
+				Values:   []string{publicEntry, "postgres"},
 			}},
 		}
 		np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
-		np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{
-			From: []networkingv1.NetworkPolicyPeer{
-				{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{instanceLabel: m.Name}}},
-			},
-		}}
+		np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{From: from}}
 		return nil
 	})
 }

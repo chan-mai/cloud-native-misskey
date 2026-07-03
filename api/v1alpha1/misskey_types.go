@@ -44,7 +44,9 @@ type MisskeySpec struct {
 
 	// Tenant is the tenant identifier stamped as the cloudnative-misskey.dev/tenant
 	// label on every managed resource and pod (incl. CNPG pods), for per-tenant log
-	// and metric routing. Immutable; defaults to the namespace when omitted.
+	// and metric routing. Immutable; defaults to the namespace when omitted. Setting
+	// it after creation (from unset) also relabels existing pods on the next
+	// reconcile and shifts the tenant key, so fix it at creation time.
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenant is immutable"
@@ -97,13 +99,10 @@ type MisskeySpec struct {
 	// +optional
 	ExtraConfig string `json:"extraConfig,omitempty"`
 
-	// NetworkIsolation creates a NetworkPolicy limiting ingress to this instance's
-	// backend pods (app/worker/redis/meilisearch) to intra-instance traffic. The
-	// public entry (proxy, or app when the proxy is disabled) stays reachable.
-	// Only effective on CNIs that enforce NetworkPolicy.
-	// +kubebuilder:default=true
+	// NetworkIsolation configures ingress isolation for this instance's backend
+	// pods (app/worker/redis/meilisearch).
 	// +optional
-	NetworkIsolation *bool `json:"networkIsolation,omitempty"`
+	NetworkIsolation NetworkIsolationSpec `json:"networkIsolation,omitempty"`
 
 	// Tenancy configures namespace-scoped isolation, assuming the namespace is
 	// dedicated to this instance.
@@ -111,9 +110,30 @@ type MisskeySpec struct {
 	Tenancy TenancySpec `json:"tenancy,omitempty"`
 }
 
+// NetworkIsolationSpec configures the per-instance ingress NetworkPolicy. It
+// limits ingress to the backend pods (app/worker/redis/meilisearch) to
+// intra-instance traffic; the public entry (proxy, or app when the proxy is
+// disabled) stays reachable. PostgreSQL is intentionally excluded and left to
+// CNPG, whose operator needs cross-namespace access to the instance manager.
+// Only effective on CNIs that enforce NetworkPolicy.
+type NetworkIsolationSpec struct {
+	// Enabled creates the isolation NetworkPolicy. Default true.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// AllowedNamespaces are namespace names (matched by the
+	// kubernetes.io/metadata.name label) permitted to reach the isolated backend
+	// pods in addition to intra-instance traffic, e.g. a monitoring namespace for
+	// Prometheus scraping.
+	// +optional
+	AllowedNamespaces []string `json:"allowedNamespaces,omitempty"`
+}
+
 // TenancySpec configures namespace-scoped tenant isolation. ResourceQuota and
 // LimitRange are namespace-wide, so they are only created when the namespace is
 // declared dedicated to this instance.
+// +kubebuilder:validation:XValidation:rule="!has(self.quota) || !self.quota.exists(k, k == 'cpu' || k == 'memory' || k.startsWith('requests.') || k.startsWith('limits.')) || (has(self.limitRange) && has(self.limitRange.default) && has(self.limitRange.defaultRequest))",message="tenancy.quota with compute resources requires tenancy.limitRange.default and defaultRequest, otherwise pods without explicit requests are rejected by the quota"
 type TenancySpec struct {
 	// Dedicated declares the namespace is dedicated to this instance, which is
 	// required to manage the namespace-scoped ResourceQuota/LimitRange below.
