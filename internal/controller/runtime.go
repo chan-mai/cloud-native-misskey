@@ -27,6 +27,12 @@ const (
 	defaultHealthPath = "/api/server-info"
 )
 
+// migrationConcurrentIndexes: migration Jobで CREATE INDEX CONCURRENTLY を使うか
+// 既定false(opt-in)。spec.migration.createIndexConcurrently=trueで有効化
+func migrationConcurrentIndexes(m *misskeyv1alpha1.Misskey) bool {
+	return boolOr(m.Spec.Migration.CreateIndexConcurrently, false)
+}
+
 // runtimeUID: spec.runtime.runAsUser、未指定なら991
 func runtimeUID(m *misskeyv1alpha1.Misskey) int64 {
 	if u := m.Spec.Runtime.RunAsUser; u != nil {

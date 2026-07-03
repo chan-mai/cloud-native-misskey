@@ -33,6 +33,12 @@ import (
 
 // buildMigrationJob: `pnpm run migrate`を1回だけ実行するJob。app/workerと同じinit/volumeを流用
 func buildMigrationJob(m *misskeyv1alpha1.Misskey, p plan) *batchv1.Job {
+	env := []corev1.EnvVar{{Name: "COREPACK_INTEGRITY_KEYS", Value: "0"}}
+	// index作成migrationを CREATE INDEX CONCURRENTLY にし、note等の巨大表への
+	// 書込ブロック(SHAREロック)を避ける。ormconfig.jsがmigrationsTransactionMode='each'へ切替
+	if migrationConcurrentIndexes(m) {
+		env = append(env, corev1.EnvVar{Name: "MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY", Value: "1"})
+	}
 	pod := corev1.PodSpec{
 		RestartPolicy:    corev1.RestartPolicyOnFailure,
 		ImagePullSecrets: m.Spec.ImagePullSecrets,
@@ -42,7 +48,7 @@ func buildMigrationJob(m *misskeyv1alpha1.Misskey, p plan) *batchv1.Job {
 			Name:            "migrate",
 			Image:           m.Spec.Image,
 			Command:         runtimeMigrateCommand(m),
-			Env:             []corev1.EnvVar{{Name: "COREPACK_INTEGRITY_KEYS", Value: "0"}},
+			Env:             env,
 			SecurityContext: restrictedContainerSecurityContext(),
 			Resources:       resourcesOr(corev1.ResourceRequirements{}, "100m", "400Mi", "800Mi"),
 			VolumeMounts:    misskeyConfigMounts(m),

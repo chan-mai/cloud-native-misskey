@@ -92,6 +92,10 @@ type MisskeySpec struct {
 	// +optional
 	Postgres PostgresSpec `json:"postgres,omitempty"`
 
+	// Migration configures the schema-migration Job behavior.
+	// +optional
+	Migration MigrationSpec `json:"migration,omitempty"`
+
 	// SetupPassword configures the initial-setup admin password written to
 	// default.yml as `setupPassword`. When the block is present with no
 	// secretRef, the operator generates a random password into the Secret
@@ -118,6 +122,20 @@ type MisskeySpec struct {
 	// dedicated to this instance.
 	// +optional
 	Tenancy TenancySpec `json:"tenancy,omitempty"`
+}
+
+// MigrationSpec configures the schema-migration Job.
+type MigrationSpec struct {
+	// CreateIndexConcurrently sets MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY=1 on the
+	// migration Job so index-creating migrations use CREATE INDEX CONCURRENTLY (which
+	// does not block writes) instead of a locking CREATE INDEX, keeping deploys
+	// non-blocking on large tables such as note. Default false (opt-in), matching
+	// Misskey's upstream default of running all migrations in a single atomic
+	// transaction. Tradeoffs when true: per-migration transactions (not one atomic
+	// batch), slower index builds, and a failed concurrent build can leave an invalid
+	// index needing manual cleanup.
+	// +optional
+	CreateIndexConcurrently *bool `json:"createIndexConcurrently,omitempty"`
 }
 
 // NetworkIsolationSpec configures the per-instance ingress NetworkPolicy. It

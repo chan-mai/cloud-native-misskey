@@ -258,6 +258,21 @@ spec:
                       named secret. Optional.
                     type: string
                 type: object
+              migration:
+                description: Migration configures the schema-migration Job behavior.
+                properties:
+                  createIndexConcurrently:
+                    description: |-
+                      CreateIndexConcurrently sets MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY=1 on the
+                      migration Job so index-creating migrations use CREATE INDEX CONCURRENTLY (which
+                      does not block writes) instead of a locking CREATE INDEX, keeping deploys
+                      non-blocking on large tables such as note. Default false (opt-in), matching
+                      Misskey's upstream default of running all migrations in a single atomic
+                      transaction. Tradeoffs when true: per-migration transactions (not one atomic
+                      batch), slower index builds, and a failed concurrent build can leave an invalid
+                      index needing manual cleanup.
+                    type: boolean
+                type: object
               networkIsolation:
                 description: |-
                   NetworkIsolation configures ingress isolation for this instance's backend

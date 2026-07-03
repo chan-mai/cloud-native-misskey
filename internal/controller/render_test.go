@@ -735,3 +735,43 @@ func TestDBEgressRule(t *testing.T) {
 		t.Errorf("egress must select cnpg.io/cluster=example-db, got %q", got)
 	}
 }
+
+func envHasName(env []corev1.EnvVar, name string) bool {
+	for _, e := range env {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMigrationConcurrentDefaultOff(t *testing.T) {
+	// spec.migration未指定はopt-in既定off: CONCURRENTLYフラグを付けない
+	m := newMisskey()
+	job := buildMigrationJob(m, resolve(m))
+	if envHasName(job.Spec.Template.Spec.Containers[0].Env, "MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY") {
+		t.Error("default (opt-in) must omit MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY")
+	}
+	// falseでも同様
+	m.Spec.Migration.CreateIndexConcurrently = boolPtr(false)
+	job = buildMigrationJob(m, resolve(m))
+	if envHasName(job.Spec.Template.Spec.Containers[0].Env, "MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY") {
+		t.Error("createIndexConcurrently=false must omit the env")
+	}
+}
+
+func TestMigrationConcurrentOptIn(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Migration.CreateIndexConcurrently = boolPtr(true)
+	job := buildMigrationJob(m, resolve(m))
+	if !envHasName(job.Spec.Template.Spec.Containers[0].Env, "MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY") {
+		t.Error("createIndexConcurrently=true must set the env on the migration Job")
+	}
+	// app/workerには付かない(migration専用)
+	for _, role := range []string{roleApp, roleWorker} {
+		spec := buildMisskeyPodSpec(m, resolve(m), role, m.Spec.App)
+		if envHasName(spec.Containers[0].Env, "MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY") {
+			t.Errorf("%s must not carry the migration concurrency env", role)
+		}
+	}
+}
