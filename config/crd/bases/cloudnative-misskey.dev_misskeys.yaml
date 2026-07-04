@@ -338,6 +338,33 @@ spec:
                       index needing manual cleanup.
                     type: boolean
                 type: object
+              monitoring:
+                description: |-
+                  Monitoring generates Prometheus ServiceMonitor/PodMonitor for the instance's
+                  managed backends (PostgreSQL/Redis/MeiliSearch).
+                properties:
+                  enabled:
+                    description: |-
+                      Enabled generates ServiceMonitor/PodMonitor and turns on each backend's
+                      metrics endpoint (CNPG :9187, a redis_exporter sidecar, MeiliSearch metrics).
+                    type: boolean
+                  interval:
+                    default: 30s
+                    description: Interval is the scrape interval. Default 30s.
+                    type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels are added to the generated ServiceMonitor/PodMonitor so your Prometheus
+                      serviceMonitorSelector/podMonitorSelector matches them (e.g. release: kps).
+                    type: object
+                  redisExporterImage:
+                    default: oliver006/redis_exporter:v1.62.0-alpine
+                    description: RedisExporterImage is the redis_exporter sidecar
+                      image for standalone Redis.
+                    type: string
+                type: object
               networkIsolation:
                 description: |-
                   NetworkIsolation configures ingress isolation for this instance's backend

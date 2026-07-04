@@ -966,3 +966,32 @@ func TestBuildScaledObjectSentinelAndOverride(t *testing.T) {
 		t.Errorf("listName override ignored: %v", meta["listName"])
 	}
 }
+
+func TestMonitoringBuilders(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Monitoring.Labels = map[string]string{"release": "kps"}
+
+	sm := buildServiceMonitor(m, "meili-metrics", "meilisearch", selectorFor(m, "meilisearch"), "http", "/metrics", &metricsAuth{name: "sec", key: "MEILI_MASTER_KEY"})
+	if sm.GetKind() != "ServiceMonitor" || sm.GetLabels()["release"] != "kps" {
+		t.Errorf("SM kind/labels wrong: %s %v", sm.GetKind(), sm.GetLabels())
+	}
+	eps, _, _ := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
+	ep0 := eps[0].(map[string]any)
+	if ep0["port"] != "http" || ep0["path"] != "/metrics" {
+		t.Errorf("SM endpoint: %v", ep0)
+	}
+	if _, ok := ep0["authorization"]; !ok {
+		t.Error("meili SM must carry authorization")
+	}
+
+	pm := buildPodMonitor(m, "pg-metrics", "postgres", map[string]string{"cnpg.io/cluster": "x"}, "metrics", nil)
+	pmeps, _, _ := unstructured.NestedSlice(pm.Object, "spec", "podMetricsEndpoints")
+	if pm.GetKind() != "PodMonitor" || pmeps[0].(map[string]any)["port"] != "metrics" {
+		t.Errorf("PM wrong: %s %v", pm.GetKind(), pmeps)
+	}
+
+	c := redisExporterContainer(m)
+	if c.Name != "metrics" || len(c.Ports) != 1 || c.Ports[0].ContainerPort != redisExporterPort {
+		t.Errorf("exporter container wrong: %+v", c)
+	}
+}

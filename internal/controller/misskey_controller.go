@@ -58,6 +58,7 @@ type MisskeyReconciler struct {
 // +kubebuilder:rbac:groups=redis.redis.opstreelabs.in,resources=redisreplications;redissentinels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects;triggerauthentications,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;podmonitors,verbs=get;list;watch;create;update;patch;delete
 
 // Misskeyインスタンスを望ましい状態へ収束させる
 func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -220,6 +221,9 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 		if err := r.reconcileIngress(ctx, m, p); err != nil {
 			return err
 		}
+	}
+	if err := r.reconcileMonitoring(ctx, m, p); err != nil {
+		return err
 	}
 	return nil
 }

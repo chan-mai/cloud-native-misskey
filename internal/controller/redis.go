@@ -241,7 +241,10 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 		svc.Labels = labelsFor(m, comp)
 		svc.Spec.ClusterIP = corev1.ClusterIPNone
 		svc.Spec.Selector = selectorFor(m, comp)
-		svc.Spec.Ports = []corev1.ServicePort{{Port: redisPort}}
+		svc.Spec.Ports = []corev1.ServicePort{{Name: "redis", Port: redisPort}}
+		if monitoringEnabled(m) {
+			svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{Name: "metrics", Port: redisExporterPort, TargetPort: intstr.FromInt32(redisExporterPort)})
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -260,19 +263,24 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 		sts.Spec.Replicas = int32Ptr(1)
 		sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, comp)}
 		sts.Spec.Template.ObjectMeta.Labels = labelsFor(m, comp)
+		containers := []corev1.Container{
+			{
+				Name:            "redis",
+				Image:           inst.image,
+				Args:            args,
+				SecurityContext: restrictedContainerSecurityContext(),
+				Resources:       resourcesOr(inst.resources, "50m", "128Mi", "512Mi"),
+				Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
+				VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+			},
+		}
+		// monitoring時はredis_exporter sidecar(standaloneは認証なし)
+		if monitoringEnabled(m) {
+			containers = append(containers, redisExporterContainer(m))
+		}
 		sts.Spec.Template.Spec = corev1.PodSpec{
 			SecurityContext: nonRootPodSecurityContext(redisUID),
-			Containers: []corev1.Container{
-				{
-					Name:            "redis",
-					Image:           inst.image,
-					Args:            args,
-					SecurityContext: restrictedContainerSecurityContext(),
-					Resources:       resourcesOr(inst.resources, "50m", "128Mi", "512Mi"),
-					Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
-					VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
-				},
-			},
+			Containers:      containers,
 		}
 		sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
 			{

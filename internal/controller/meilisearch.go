@@ -88,6 +88,16 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 		sts.Spec.Replicas = int32Ptr(1)
 		sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, "meilisearch")}
 		sts.Spec.Template.ObjectMeta.Labels = labelsFor(m, "meilisearch")
+		meiliEnv := []corev1.EnvVar{
+			secretEnv("MEILI_MASTER_KEY", p.meiliKeySel),
+			{Name: "MEILI_ENV", Value: "production"},
+			{Name: "MEILI_NO_ANALYTICS", Value: "true"},
+			{Name: "MEILI_DB_PATH", Value: "/meili_data"},
+		}
+		// monitoring時のみ/metricsエンドポイントを有効化
+		if monitoringEnabled(m) {
+			meiliEnv = append(meiliEnv, corev1.EnvVar{Name: "MEILI_EXPERIMENTAL_ENABLE_METRICS", Value: "true"})
+		}
 		sts.Spec.Template.Spec = corev1.PodSpec{
 			SecurityContext: nonRootPodSecurityContext(genericNonRootUID),
 			Containers: []corev1.Container{
@@ -96,13 +106,8 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 					Image:           image,
 					SecurityContext: restrictedContainerSecurityContext(),
 					Resources:       resourcesOr(m.Spec.Search.Meilisearch.Resources, "100m", "256Mi", "1Gi"),
-					Env: []corev1.EnvVar{
-						secretEnv("MEILI_MASTER_KEY", p.meiliKeySel),
-						{Name: "MEILI_ENV", Value: "production"},
-						{Name: "MEILI_NO_ANALYTICS", Value: "true"},
-						{Name: "MEILI_DB_PATH", Value: "/meili_data"},
-					},
-					Ports: []corev1.ContainerPort{{ContainerPort: meiliPort}},
+					Env:             meiliEnv,
+					Ports:           []corev1.ContainerPort{{ContainerPort: meiliPort}},
 					ReadinessProbe: &corev1.Probe{
 						ProbeHandler: corev1.ProbeHandler{
 							HTTPGet: &corev1.HTTPGetAction{Path: "/health", Port: intstr.FromInt32(meiliPort)},

@@ -45,6 +45,7 @@ flowchart TD
 | OT-CONTAINER-KIT redis-operator | `spec.redis.ha`のSentinel HA | redis HA有効時のみ |
 | KEDA | `spec.worker.autoscaling.queues`のキュー深度スケール | worker queueスケール時のみ |
 | metrics-server | `spec.app.autoscaling`のCPU/memory HPA | app HPA有効時のみ |
+| Prometheus Operator | `spec.monitoring`のServiceMonitor/PodMonitor | monitoring有効時のみ |
 | Ingress controller | `spec.ingress`公開(nginx/traefik等) | ingress有効時のみ |
 | RWO StorageClass | Redis/MeiliSearch/PostgreSQLのPVC | managed時のみ |
 
@@ -143,6 +144,7 @@ spec:
 | `egressIsolation.enabled` | `false` | egress隔離(opt-in)。app/workerはpublic可、他backendはintra+DNSのみ。postgresは除外 |
 | `egressIsolation.dnsNamespace` | `kube-system` | egress隔離時に`:53`を許すDNS namespace |
 | `tenancy.dedicated` | `false` | namespace占有宣言。`quota`(ResourceQuota)/`limitRange`(LimitRange)生成の前提 |
+| `monitoring.enabled` | `false` | PostgreSQL/Redis/MeiliSearchのServiceMonitor/PodMonitorを生成(opt-in, Prometheus Operator必須)。Redisはexporter、Meiliは`/metrics`を自動有効化。`monitoring.labels`でPrometheus selector合わせ |
 | `extraConfig` | (なし) | `default.yml`末尾に追記する生YAML |
 
 ## フォークイメージ

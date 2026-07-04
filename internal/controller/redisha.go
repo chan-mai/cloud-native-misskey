@@ -96,6 +96,10 @@ func buildRedisReplication(m *misskeyv1alpha1.Misskey, inst redisManagedInstance
 			},
 		},
 	}
+	// monitoring時はOTのredis_exporter sidecar(auth自動配線)を有効化
+	if monitoringEnabled(m) {
+		spec["redisExporter"] = map[string]any{"enabled": true}
+	}
 	return redisUnstructured(m, inst.suffix, redisReplicationGVK, nameRedisInstance(m, inst.suffix), spec)
 }
 

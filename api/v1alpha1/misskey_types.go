@@ -122,6 +122,35 @@ type MisskeySpec struct {
 	// dedicated to this instance.
 	// +optional
 	Tenancy TenancySpec `json:"tenancy,omitempty"`
+
+	// Monitoring generates Prometheus ServiceMonitor/PodMonitor for the instance's
+	// managed backends (PostgreSQL/Redis/MeiliSearch).
+	// +optional
+	Monitoring MonitoringSpec `json:"monitoring,omitempty"`
+}
+
+// MonitoringSpec configures Prometheus scraping of the managed backends. Requires
+// the Prometheus Operator CRDs (ServiceMonitor/PodMonitor). Opt-in.
+type MonitoringSpec struct {
+	// Enabled generates ServiceMonitor/PodMonitor and turns on each backend's
+	// metrics endpoint (CNPG :9187, a redis_exporter sidecar, MeiliSearch metrics).
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Labels are added to the generated ServiceMonitor/PodMonitor so your Prometheus
+	// serviceMonitorSelector/podMonitorSelector matches them (e.g. release: kps).
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Interval is the scrape interval. Default 30s.
+	// +kubebuilder:default="30s"
+	// +optional
+	Interval string `json:"interval,omitempty"`
+
+	// RedisExporterImage is the redis_exporter sidecar image for standalone Redis.
+	// +kubebuilder:default="oliver006/redis_exporter:v1.62.0-alpine"
+	// +optional
+	RedisExporterImage string `json:"redisExporterImage,omitempty"`
 }
 
 // MigrationSpec configures the schema-migration Job.
