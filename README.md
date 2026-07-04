@@ -285,6 +285,7 @@ make fmt vet
 - Validating/Mutating webhookを`config/default-webhook`(cert-manager必須、opt-in)で提供します。`url`/`idGenerationMethod`/`tenant`のimmutable検証、managed/external排他やautoscaling範囲等のcross-field検証、tenant未設定→namespace確定のdefaultingを行います。cert-manager無しなら`config/default`(webhook無し)を使い`ENABLE_WEBHOOKS=false`で無効化します。
 - egress隔離は`spec.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(private/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。
 - PostgreSQL(CNPG)は隔離NetworkPolicyの対象外です。CNPG operatorが別namespaceからinstance manager(:8000)へ接続するため意図的に除外しており、DBのネットワーク保護はCNPG/platform側に委ねます。backend隔離下で監視namespaceからscrapeするには`networkIsolation.allowedNamespaces`で明示的に開けてください。
+- **オブジェクトストレージ(media)は本Operatorの責務外です。** これは、Misskeyのオブジェクトストレージ設定はコントロールパネルで行うものであり、`default.yml`から宣言的に投入できないためです。未設定時のアップロードファイルはpodローカル(emptyDir)に置かれ、**pod再起動で消え、複数レプリカ間でも共有されません**。よって`app.replicas>1`で運用する場合は、初期セットアップ後にオブジェクトストレージを設定してください。
 - MeiliSearchは公式に水平スケール機構がないため、単一レプリカで動かします。
 - シークレットの値だけを更新(ローテーション)してもPodは再起動しません。ローリング判定のchecksumはプレースホルダ入りの`default.yml`本文基準で、値の変化を見ないためです。参照Secretの`resourceVersion`をchecksumに含める拡張は可能です。
 - メンテナンス応答は既定HTTP 200のため、外形監視は実ステータスを返す`/api/*`を対象にしてください。
