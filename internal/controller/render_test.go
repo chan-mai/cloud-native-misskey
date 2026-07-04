@@ -561,6 +561,46 @@ func TestPoolerHelpers(t *testing.T) {
 	}
 }
 
+func TestRedisHAAuth(t *testing.T) {
+	// HA redis: requirepass secret参照 + passEnv
+	m := newMisskey()
+	m.Spec.Redis.HA = &misskeyv1alpha1.RedisHA{}
+	ep := resolve(m).redisDefault
+	if ep.passSel == nil || ep.passSel.Name != "example-redis-auth" || ep.passSel.Key != "password" {
+		t.Errorf("HA redis must carry requirepass secret ref: %+v", ep.passSel)
+	}
+	if ep.passEnv != "REDIS_PASSWORD" {
+		t.Errorf("default HA passEnv: %q", ep.passEnv)
+	}
+	// standalone managed: 認証なし(NP保護)
+	if resolve(newMisskey()).redisDefault.passSel != nil {
+		t.Error("standalone managed redis must not have auth")
+	}
+	// role HA: role別passEnv
+	m2 := newMisskey()
+	m2.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{JobQueue: &misskeyv1alpha1.RedisRole{HA: &misskeyv1alpha1.RedisHA{}}}
+	epr := resolve(m2).redisRoles["jobQueue"]
+	if epr.passSel == nil || epr.passEnv != "REDIS_PASSWORD_JOBQUEUE" {
+		t.Errorf("role HA auth wrong: sel=%+v env=%q", epr.passSel, epr.passEnv)
+	}
+	// config: HAで pass + sentinelPassword プレースホルダ出力(OT sentinelもrequirepass)
+	out := renderDefaultYML(m, resolve(m))
+	for _, s := range []string{"pass: ${REDIS_PASSWORD}", "sentinelPassword: ${REDIS_PASSWORD}"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("HA redis config must emit %q:\n%s", s, out)
+		}
+	}
+	// KEDA TriggerAuth: sentinel経路はpassword + sentinelPassword両方
+	ta := buildTriggerAuth(m, "example-worker", ep)
+	params := map[string]bool{}
+	for _, ref := range ta.Object["spec"].(map[string]any)["secretTargetRef"].([]any) {
+		params[ref.(map[string]any)["parameter"].(string)] = true
+	}
+	if !params["password"] || !params["sentinelPassword"] {
+		t.Errorf("sentinel TriggerAuth must include password + sentinelPassword: %+v", params)
+	}
+}
+
 func TestResolveRedisRoleFallback(t *testing.T) {
 	// roles未指定 → redisRolesは空、configはredisForXxxを出さない
 	p := resolve(newMisskey())
@@ -688,6 +728,13 @@ func TestBuildRedisReplicationAndSentinel(t *testing.T) {
 	}
 	if psc := rspec["podSecurityContext"].(map[string]any); psc["fsGroup"] != int64(1000) {
 		t.Errorf("fsGroup must be 1000 (opstree non-root): %v", psc["fsGroup"])
+	}
+	rkc := rspec["kubernetesConfig"].(map[string]any)
+	if rs, ok := rkc["redisSecret"].(map[string]any); !ok || rs["name"] != "example-redis-auth" {
+		t.Errorf("HA replication must set redisSecret (requirepass): %v", rkc["redisSecret"])
+	}
+	if pvc, ok := rkc["persistentVolumeClaimRetentionPolicy"].(map[string]any); !ok || pvc["whenDeleted"] != "Retain" {
+		t.Errorf("PVC retention must be Retain: %v", rkc["persistentVolumeClaimRetentionPolicy"])
 	}
 
 	sen := buildRedisSentinel(m, inst)
@@ -892,8 +939,8 @@ func TestBuildScaledObjectSentinelAndOverride(t *testing.T) {
 	}
 	so := buildScaledObject(m, roleWorker, "example-worker", a, jobQueueEndpoint(resolve(m)))
 	spec := so.Object["spec"].(map[string]any)
-	if _, ok := spec["minReplicaCount"]; ok {
-		t.Errorf("minReplicas unset must omit minReplicaCount: %v", spec["minReplicaCount"])
+	if spec["minReplicaCount"] != int64(1) {
+		t.Errorf("minReplicas unset must default to 1 (parity with HPA/godoc): %v", spec["minReplicaCount"])
 	}
 	trig := scaledObjectTriggers(spec)[0].(map[string]any)
 	if trig["type"] != "redis-sentinel" {

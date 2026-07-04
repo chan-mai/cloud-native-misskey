@@ -129,6 +129,15 @@ func buildManagedInstance(m *misskeyv1alpha1.Misskey, suffix string, role *missk
 // 望ましくなくなった(external化/role削除/mode切替)インスタンスを掃除
 func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	desired := managedRedisInstances(m)
+	// HAが1つでもあればrequirepass用のauth secretを用意(CR/pod参照前に存在させる)
+	for _, inst := range desired {
+		if inst.ha {
+			if err := r.reconcileRedisAuthSecret(ctx, m); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	seenStandalone := map[string]bool{}
 	seenHA := map[string]bool{}
 	for _, inst := range desired {
@@ -140,9 +149,15 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 			if err := r.reconcileRedisHA(ctx, m, inst); err != nil {
 				return err
 			}
+			if err := r.reconcileRedisHANetworkPolicy(ctx, m, inst); err != nil {
+				return err
+			}
 			seenHA[inst.suffix] = true
 		} else {
 			if err := r.deleteRedisHA(ctx, m, inst.suffix); err != nil {
+				return err
+			}
+			if err := r.deleteRedisHANetworkPolicy(ctx, m, inst.suffix); err != nil {
 				return err
 			}
 			if err := r.reconcileRedisStandalone(ctx, m, inst); err != nil {
@@ -162,9 +177,58 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 			if err := r.deleteRedisHA(ctx, m, suffix); err != nil {
 				return err
 			}
+			if err := r.deleteRedisHANetworkPolicy(ctx, m, suffix); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// reconcileRedisHANetworkPolicy: operator管理HA redis/sentinel podへのingressを制限
+// app/worker + intra-HA + allowedNamespaces(redis-operator/keda)のみ許可
+// requirepassと併せた多層防御。spec.redis.networkPolicy=falseで無効化
+func (r *MisskeyReconciler) reconcileRedisHANetworkPolicy(ctx context.Context, m *misskeyv1alpha1.Misskey, inst redisManagedInstance) error {
+	name := nameRedisInstance(m, inst.suffix) + "-ha"
+	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.Namespace}}
+	if !inst.networkPolicy {
+		return r.deleteIfExists(ctx, np)
+	}
+	rp := intstr.FromInt32(redisPort)
+	sp := intstr.FromInt32(sentinelPort)
+	// operatorはCR名をpodのappラベルに付ける(replication=<name>、sentinel=<name>-sentinel)
+	haApps := []string{nameRedisInstance(m, inst.suffix), nameRedisSentinelService(m, inst.suffix)}
+	appIn := metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+		Key: "app", Operator: metav1.LabelSelectorOpIn, Values: haApps,
+	}}}
+	return r.apply(ctx, m, np, func() error {
+		np.Labels = labelsFor(m, "redis")
+		np.Spec.PodSelector = appIn
+		np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+		from := []networkingv1.NetworkPolicyPeer{
+			{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleApp)}},
+			{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleWorker)}},
+			// replication/sentinel相互(intra-HA)
+			{PodSelector: &appIn},
+		}
+		// redis-operator/KEDA等のcross-ns(管理・metric取得)。networkIsolation.allowedNamespacesを流用
+		for _, ns := range m.Spec.NetworkIsolation.AllowedNamespaces {
+			from = append(from, networkingv1.NetworkPolicyPeer{
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{nsNameLabel: ns}},
+			})
+		}
+		np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{
+			From:  from,
+			Ports: []networkingv1.NetworkPolicyPort{{Port: &rp}, {Port: &sp}},
+		}}
+		return nil
+	})
+}
+
+// deleteRedisHANetworkPolicy: 指定suffixのHA redis NPを掃除
+func (r *MisskeyReconciler) deleteRedisHANetworkPolicy(ctx context.Context, m *misskeyv1alpha1.Misskey, suffix string) error {
+	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: nameRedisInstance(m, suffix) + "-ha", Namespace: m.Namespace}}
+	return r.deleteIfExists(ctx, np)
 }
 
 // reconcileRedisStandalone: 単一pod Redis(Service+StatefulSet+任意NetworkPolicy)

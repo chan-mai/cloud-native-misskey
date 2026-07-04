@@ -22,12 +22,37 @@ import (
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
+
+// redisAuthSecretRef: OT operator redisSecret/EnvVarSource用のsecret参照
+func redisAuthSecretRef(m *misskeyv1alpha1.Misskey) map[string]any {
+	return map[string]any{"name": nameRedisAuthSecret(m), "key": "password"}
+}
+
+// reconcileRedisAuthSecret: HA redisのrequirepass用にrandom passwordのSecretを保証(冪等・生成後は不変)
+func (r *MisskeyReconciler) reconcileRedisAuthSecret(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameRedisAuthSecret(m), Namespace: m.Namespace}}
+	return r.apply(ctx, m, secret, func() error {
+		secret.Labels = labelsFor(m, "redis")
+		if secret.Data == nil {
+			secret.Data = map[string][]byte{}
+		}
+		if _, ok := secret.Data["password"]; !ok {
+			pw, err := randomHex(24)
+			if err != nil {
+				return err
+			}
+			secret.Data["password"] = []byte(pw)
+		}
+		return nil
+	})
+}
 
 // OT-CONTAINER-KIT redis-operatorのGVK。opstree Redis8イメージでSentinel HAを構成
 var (
@@ -55,6 +80,13 @@ func buildRedisReplication(m *misskeyv1alpha1.Misskey, inst redisManagedInstance
 			"image":           inst.haImage,
 			"imagePullPolicy": "IfNotPresent",
 			"resources":       res,
+			// requirepass認証(operator生成secret)。任意podからの無認証read/writeを防ぐ
+			"redisSecret": redisAuthSecretRef(m),
+			// HA→standalone/role削除時にデータPVCを消さない(scale/delete両方Retain)
+			"persistentVolumeClaimRetentionPolicy": map[string]any{
+				"whenDeleted": "Retain",
+				"whenScaled":  "Retain",
+			},
 		},
 		// opstreeイメージのnon-root書込にfsGroup必須
 		"podSecurityContext": redisHAPodSecurityContext(),
@@ -77,12 +109,17 @@ func buildRedisSentinel(m *misskeyv1alpha1.Misskey, inst redisManagedInstance) *
 			"image":           inst.haSentinelImage,
 			"imagePullPolicy": "IfNotPresent",
 			"resources":       res,
+			"redisSecret":     redisAuthSecretRef(m),
 		},
 		"podSecurityContext": redisHAPodSecurityContext(),
 		"redisSentinelConfig": map[string]any{
 			"redisReplicationName": nameRedisInstance(m, inst.suffix),
 			"masterGroupName":      redisMasterGroup,
 			"quorum":               quorum,
+			// sentinelがauth付きmasterを監視するための認証情報
+			"redisReplicationPassword": map[string]any{
+				"secretKeyRef": map[string]any{"name": nameRedisAuthSecret(m), "key": "password"},
+			},
 		},
 	}
 	return redisUnstructured(m, inst.suffix, redisSentinelGVK, nameRedisInstance(m, inst.suffix), spec)

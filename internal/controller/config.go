@@ -47,6 +47,10 @@ func renderRedisBlock(w func(string, ...any), key string, ep redisEndpoint) {
 	}
 	if ep.passSel != nil {
 		w("  pass: ${%s}\n", ep.passEnv)
+		// OT operatorのsentinelもrequirepassを要求するためsentinelPasswordが要る(ioredis passthrough)
+		if len(ep.sentinels) > 0 {
+			w("  sentinelPassword: ${%s}\n", ep.passEnv)
+		}
 	}
 }
 

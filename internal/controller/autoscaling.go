@@ -180,13 +180,16 @@ func buildScaledObject(m *misskeyv1alpha1.Misskey, component, targetName string,
 		})
 	}
 
+	// MinReplicas未指定はKEDA既定0だが、godoc/app HPAと揃え既定1にする(0スケールはidle後の初回遅延あり)
+	minReplicas := int64(1)
+	if a.MinReplicas != nil {
+		minReplicas = int64(*a.MinReplicas)
+	}
 	spec := map[string]any{
 		"scaleTargetRef":  map[string]any{"name": targetName},
+		"minReplicaCount": minReplicas,
 		"maxReplicaCount": int64(a.MaxReplicas),
 		"triggers":        triggers,
-	}
-	if a.MinReplicas != nil {
-		spec["minReplicaCount"] = int64(*a.MinReplicas)
 	}
 
 	u := &unstructured.Unstructured{}
@@ -214,11 +217,14 @@ func buildTriggerAuth(m *misskeyv1alpha1.Misskey, targetName string, ep redisEnd
 	u.SetName(nameTriggerAuth(targetName))
 	u.SetNamespace(m.Namespace)
 	u.SetLabels(labelsFor(m, "autoscaler"))
-	u.Object["spec"] = map[string]any{
-		"secretTargetRef": []any{
-			map[string]any{"parameter": "password", "name": ep.passSel.Name, "key": ep.passSel.Key},
-		},
+	refs := []any{
+		map[string]any{"parameter": "password", "name": ep.passSel.Name, "key": ep.passSel.Key},
 	}
+	// sentinel(HA)経路はsentinel portもrequirepass。KEDAがsentinelへauthするため必要
+	if len(ep.sentinels) > 0 {
+		refs = append(refs, map[string]any{"parameter": "sentinelPassword", "name": ep.passSel.Name, "key": ep.passSel.Key})
+	}
+	u.Object["spec"] = map[string]any{"secretTargetRef": refs}
 	return u
 }
 
