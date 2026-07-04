@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -248,8 +249,10 @@ func (r *MisskeyReconciler) reconcileLimitRange(ctx context.Context, m *misskeyv
 }
 
 // deleteIfExists: 存在すれば削除(オプション無効化時のcleanup用)
+// CRD未導入(オプションoperator=CNPG/redis-operator/KEDA不在)時のNoMatchも無視し、
+// HA/pooler/autoscaling未使用のインスタンスがそれら未インストール環境でも壊れないようにする
 func (r *MisskeyReconciler) deleteIfExists(ctx context.Context, obj client.Object) error {
-	if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) && !apimeta.IsNoMatchError(err) {
 		return err
 	}
 	return nil

@@ -58,6 +58,71 @@ spec:
                 description: App configures the web/API server Deployment (runs with
                   MK_ONLY_SERVER).
                 properties:
+                  autoscaling:
+                    description: |-
+                      Autoscaling replaces the static Replicas with a HorizontalPodAutoscaler
+                      (CPU/memory) or, when queues are set, a KEDA ScaledObject (BullMQ queue
+                      depth). HPA needs metrics-server; queue scaling needs KEDA installed.
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled toggles autoscaling when the block is
+                          present.
+                        type: boolean
+                      maxReplicas:
+                        description: MaxReplicas is the upper bound.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        description: |-
+                          MinReplicas is the lower bound. Default 1; use >=2 so the PodDisruptionBudget
+                          (maxUnavailable=1) still allows node drains.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      queues:
+                        description: |-
+                          Queues, when set, switches the mechanism to a KEDA ScaledObject that scales on
+                          BullMQ queue wait-list depth. Requires KEDA in the cluster. Meaningful for the
+                          worker; typically deliver and inbox.
+                        items:
+                          description: QueueScaleTrigger scales on the wait-list depth
+                            of one BullMQ queue.
+                          properties:
+                            listLength:
+                              description: ListLength is the target average wait-list
+                                length per replica.
+                              format: int32
+                              minimum: 1
+                              type: integer
+                            listName:
+                              description: |-
+                                ListName overrides the exact Redis key watched. Defaults to the computed
+                                BullMQ wait-list key for Name.
+                              type: string
+                            name:
+                              description: Name is the BullMQ queue name, e.g. deliver,
+                                inbox.
+                              type: string
+                          required:
+                          - listLength
+                          - name
+                          type: object
+                        type: array
+                      targetCPUUtilizationPercentage:
+                        description: TargetCPUUtilizationPercentage adds a CPU utilization
+                          metric. Unset omits it.
+                        format: int32
+                        type: integer
+                      targetMemoryUtilizationPercentage:
+                        description: TargetMemoryUtilizationPercentage adds a memory
+                          utilization metric. Unset omits it.
+                        format: int32
+                        type: integer
+                    required:
+                    - maxReplicas
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -2029,6 +2094,71 @@ spec:
                 description: Worker configures the job queue Deployment (runs with
                   MK_ONLY_QUEUE).
                 properties:
+                  autoscaling:
+                    description: |-
+                      Autoscaling replaces the static Replicas with a HorizontalPodAutoscaler
+                      (CPU/memory) or, when queues are set, a KEDA ScaledObject (BullMQ queue
+                      depth). HPA needs metrics-server; queue scaling needs KEDA installed.
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled toggles autoscaling when the block is
+                          present.
+                        type: boolean
+                      maxReplicas:
+                        description: MaxReplicas is the upper bound.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        description: |-
+                          MinReplicas is the lower bound. Default 1; use >=2 so the PodDisruptionBudget
+                          (maxUnavailable=1) still allows node drains.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      queues:
+                        description: |-
+                          Queues, when set, switches the mechanism to a KEDA ScaledObject that scales on
+                          BullMQ queue wait-list depth. Requires KEDA in the cluster. Meaningful for the
+                          worker; typically deliver and inbox.
+                        items:
+                          description: QueueScaleTrigger scales on the wait-list depth
+                            of one BullMQ queue.
+                          properties:
+                            listLength:
+                              description: ListLength is the target average wait-list
+                                length per replica.
+                              format: int32
+                              minimum: 1
+                              type: integer
+                            listName:
+                              description: |-
+                                ListName overrides the exact Redis key watched. Defaults to the computed
+                                BullMQ wait-list key for Name.
+                              type: string
+                            name:
+                              description: Name is the BullMQ queue name, e.g. deliver,
+                                inbox.
+                              type: string
+                          required:
+                          - listLength
+                          - name
+                          type: object
+                        type: array
+                      targetCPUUtilizationPercentage:
+                        description: TargetCPUUtilizationPercentage adds a CPU utilization
+                          metric. Unset omits it.
+                        format: int32
+                        type: integer
+                      targetMemoryUtilizationPercentage:
+                        description: TargetMemoryUtilizationPercentage adds a memory
+                          utilization metric. Unset omits it.
+                        format: int32
+                        type: integer
+                    required:
+                    - maxReplicas
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string

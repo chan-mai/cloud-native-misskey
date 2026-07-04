@@ -57,9 +57,12 @@ func ptrIntStr(v intstr.IntOrString) *intstr.IntOrString { return &v }
 
 // CreateOrUpdate用にDeploymentのフィールドを冪等に埋める
 // annotation(例: configチェックサム)はpodテンプレートにマージし、他ツールが付与したテンプレートannotationを潰さずconfig変更でローリング更新を起こす
+// replicasがnilの時はReplicasを触らない(autoscaling有効時、HPA/KEDA管理値を保持)
 func setDeployment(dep *appsv1.Deployment, m *misskeyv1alpha1.Misskey, component string, replicas *int32, pod corev1.PodSpec, annotations map[string]string) {
 	dep.Labels = labelsFor(m, component)
-	dep.Spec.Replicas = replicas
+	if replicas != nil {
+		dep.Spec.Replicas = replicas
+	}
 	dep.Spec.Strategy = rollingZeroDowntime()
 	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, component)}
 	dep.Spec.Template.ObjectMeta.Labels = labelsFor(m, component)
@@ -87,28 +90,42 @@ func (r *MisskeyReconciler) reconcileAppService(ctx context.Context, m *misskeyv
 	})
 }
 
-// app Deployment+PDB。MigrationComplete後にのみ呼ぶ
+// app Deployment+PDB+autoscaler。MigrationComplete後にのみ呼ぶ
 func (r *MisskeyReconciler) reconcileApp(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameApp(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleApp, m.Spec.App)
-		setDeployment(dep, m, roleApp, replicasOr(m.Spec.App.Replicas, 1), pod, checksumAnnotation(renderDefaultYML(m, p)))
+		setDeployment(dep, m, roleApp, staticReplicas(m.Spec.App), pod, checksumAnnotation(renderDefaultYML(m, p)))
 		return nil
 	}); err != nil {
 		return err
 	}
-	return r.reconcilePDB(ctx, m, roleApp)
+	if err := r.reconcilePDB(ctx, m, roleApp); err != nil {
+		return err
+	}
+	return r.reconcileAutoscaler(ctx, m, roleApp, nameApp(m), m.Spec.App.Autoscaling, p)
 }
 
-// workerのDeploymentを作成/更新
+// workerのDeployment+PDB+autoscaler
 func (r *MisskeyReconciler) reconcileWorker(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) error {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameWorker(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleWorker, m.Spec.Worker)
-		setDeployment(dep, m, roleWorker, replicasOr(m.Spec.Worker.Replicas, 1), pod, checksumAnnotation(renderDefaultYML(m, p)))
+		setDeployment(dep, m, roleWorker, staticReplicas(m.Spec.Worker), pod, checksumAnnotation(renderDefaultYML(m, p)))
 		return nil
 	}); err != nil {
 		return err
 	}
-	return r.reconcilePDB(ctx, m, roleWorker)
+	if err := r.reconcilePDB(ctx, m, roleWorker); err != nil {
+		return err
+	}
+	return r.reconcileAutoscaler(ctx, m, roleWorker, nameWorker(m), m.Spec.Worker.Autoscaling, p)
+}
+
+// staticReplicas: autoscaling有効ならnil(autoscalerがreplicas管理)、無効ならreplicasOr
+func staticReplicas(comp misskeyv1alpha1.ComponentSpec) *int32 {
+	if autoscalingEnabled(comp.Autoscaling) {
+		return nil
+	}
+	return replicasOr(comp.Replicas, 1)
 }

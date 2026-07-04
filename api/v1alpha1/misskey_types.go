@@ -276,6 +276,61 @@ type ComponentSpec struct {
 	// Tolerations allow scheduling onto tainted nodes.
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// Autoscaling replaces the static Replicas with a HorizontalPodAutoscaler
+	// (CPU/memory) or, when queues are set, a KEDA ScaledObject (BullMQ queue
+	// depth). HPA needs metrics-server; queue scaling needs KEDA installed.
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
+}
+
+// AutoscalingSpec configures autoscaling for an app/worker Deployment. When
+// Queues is empty a native HPA is created (CPU/memory); when Queues is set a
+// KEDA ScaledObject is created that scales on BullMQ wait-list depth.
+type AutoscalingSpec struct {
+	// Enabled toggles autoscaling when the block is present.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// MinReplicas is the lower bound. Default 1; use >=2 so the PodDisruptionBudget
+	// (maxUnavailable=1) still allows node drains.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+
+	// MaxReplicas is the upper bound.
+	// +kubebuilder:validation:Minimum=1
+	MaxReplicas int32 `json:"maxReplicas"`
+
+	// TargetCPUUtilizationPercentage adds a CPU utilization metric. Unset omits it.
+	// +optional
+	TargetCPUUtilizationPercentage *int32 `json:"targetCPUUtilizationPercentage,omitempty"`
+
+	// TargetMemoryUtilizationPercentage adds a memory utilization metric. Unset omits it.
+	// +optional
+	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
+
+	// Queues, when set, switches the mechanism to a KEDA ScaledObject that scales on
+	// BullMQ queue wait-list depth. Requires KEDA in the cluster. Meaningful for the
+	// worker; typically deliver and inbox.
+	// +optional
+	Queues []QueueScaleTrigger `json:"queues,omitempty"`
+}
+
+// QueueScaleTrigger scales on the wait-list depth of one BullMQ queue.
+type QueueScaleTrigger struct {
+	// Name is the BullMQ queue name, e.g. deliver, inbox.
+	Name string `json:"name"`
+
+	// ListLength is the target average wait-list length per replica.
+	// +kubebuilder:validation:Minimum=1
+	ListLength int32 `json:"listLength"`
+
+	// ListName overrides the exact Redis key watched. Defaults to the computed
+	// BullMQ wait-list key for Name.
+	// +optional
+	ListName string `json:"listName,omitempty"`
 }
 
 // ProxySpec configures the Caddy reverse proxy and maintenance fallback.

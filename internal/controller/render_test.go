@@ -775,3 +775,135 @@ func TestMigrationConcurrentOptIn(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoscalingHelpers(t *testing.T) {
+	if autoscalingEnabled(nil) {
+		t.Error("nil autoscaling must be disabled")
+	}
+	a := &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 5}
+	if !autoscalingEnabled(a) {
+		t.Error("present block defaults enabled")
+	}
+	a.Enabled = boolPtr(false)
+	if autoscalingEnabled(a) {
+		t.Error("enabled=false must disable")
+	}
+	if autoscalingUsesKEDA(&misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 5}) {
+		t.Error("no queues → native HPA")
+	}
+	if !autoscalingUsesKEDA(&misskeyv1alpha1.AutoscalingSpec{Queues: []misskeyv1alpha1.QueueScaleTrigger{{Name: "deliver", ListLength: 1}}}) {
+		t.Error("queues → KEDA")
+	}
+}
+
+func TestStaticReplicas(t *testing.T) {
+	comp := misskeyv1alpha1.ComponentSpec{Replicas: int32Ptr(3)}
+	if r := staticReplicas(comp); r == nil || *r != 3 {
+		t.Errorf("no autoscaling → static replicas: %v", r)
+	}
+	comp.Autoscaling = &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 5}
+	if staticReplicas(comp) != nil {
+		t.Error("autoscaling → replicas unmanaged (nil)")
+	}
+}
+
+func TestBuildHPASpec(t *testing.T) {
+	a := &misskeyv1alpha1.AutoscalingSpec{MinReplicas: int32Ptr(2), MaxReplicas: 10, TargetCPUUtilizationPercentage: int32Ptr(70)}
+	spec := buildHPASpec("example-app", a)
+	if spec.ScaleTargetRef.Name != "example-app" || spec.ScaleTargetRef.Kind != "Deployment" {
+		t.Errorf("scaleTargetRef wrong: %+v", spec.ScaleTargetRef)
+	}
+	if spec.MinReplicas == nil || *spec.MinReplicas != 2 || spec.MaxReplicas != 10 {
+		t.Errorf("min/max wrong: %v/%d", spec.MinReplicas, spec.MaxReplicas)
+	}
+	if len(spec.Metrics) != 1 || spec.Metrics[0].Resource.Name != corev1.ResourceCPU || *spec.Metrics[0].Resource.Target.AverageUtilization != 70 {
+		t.Errorf("cpu metric wrong: %+v", spec.Metrics)
+	}
+	// 未指定はcpu80%にfallback(HPAは最低1 metric要)
+	def := buildHPASpec("x", &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 3})
+	if len(def.Metrics) != 1 || *def.Metrics[0].Resource.Target.AverageUtilization != 80 {
+		t.Errorf("default metric must be cpu 80: %+v", def.Metrics)
+	}
+	// memory
+	mem := buildHPASpec("x", &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 3, TargetMemoryUtilizationPercentage: int32Ptr(75)})
+	if len(mem.Metrics) != 1 || mem.Metrics[0].Resource.Name != corev1.ResourceMemory {
+		t.Errorf("memory metric wrong: %+v", mem.Metrics)
+	}
+}
+
+func TestJobQueueEndpoint(t *testing.T) {
+	// role未分離 → default redis
+	if ep := jobQueueEndpoint(resolve(newMisskey())); ep.host != "example-redis" {
+		t.Errorf("default jobQueue endpoint: %q", ep.host)
+	}
+	// jobQueue分離 → 専用インスタンス
+	m := newMisskey()
+	m.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{JobQueue: &misskeyv1alpha1.RedisRole{}}
+	if ep := jobQueueEndpoint(resolve(m)); ep.host != "example-redis-jobqueue" {
+		t.Errorf("separated jobQueue endpoint: %q", ep.host)
+	}
+}
+
+func scaledObjectTriggers(so map[string]any) []any {
+	return so["triggers"].([]any)
+}
+
+func TestBuildScaledObjectStandalone(t *testing.T) {
+	m := newMisskey() // default redis standalone
+	a := &misskeyv1alpha1.AutoscalingSpec{
+		MinReplicas: int32Ptr(1), MaxReplicas: 30,
+		Queues: []misskeyv1alpha1.QueueScaleTrigger{{Name: "deliver", ListLength: 1000}, {Name: "inbox", ListLength: 500}},
+	}
+	so := buildScaledObject(m, roleWorker, "example-worker", a, jobQueueEndpoint(resolve(m)))
+	if so.GetKind() != "ScaledObject" || so.GetName() != "example-worker" {
+		t.Errorf("identity wrong: %s/%s", so.GetKind(), so.GetName())
+	}
+	spec := so.Object["spec"].(map[string]any)
+	if spec["scaleTargetRef"].(map[string]any)["name"] != "example-worker" {
+		t.Errorf("scaleTargetRef wrong: %v", spec["scaleTargetRef"])
+	}
+	if spec["maxReplicaCount"] != int64(30) || spec["minReplicaCount"] != int64(1) {
+		t.Errorf("min/max wrong: %v/%v", spec["minReplicaCount"], spec["maxReplicaCount"])
+	}
+	trigs := scaledObjectTriggers(spec)
+	if len(trigs) != 2 {
+		t.Fatalf("expected 2 queue triggers, got %d", len(trigs))
+	}
+	t0 := trigs[0].(map[string]any)
+	if t0["type"] != "redis" {
+		t.Errorf("standalone must use redis trigger: %v", t0["type"])
+	}
+	meta := t0["metadata"].(map[string]any)
+	if meta["address"] != "example-redis.ns.svc:6379" || meta["listLength"] != "1000" {
+		t.Errorf("trigger meta wrong (FQDN address for cross-ns KEDA): %+v", meta)
+	}
+	if meta["listName"] != "misskey.example.com:queue:deliver:deliver:wait" {
+		t.Errorf("computed listName wrong: %v", meta["listName"])
+	}
+}
+
+func TestBuildScaledObjectSentinelAndOverride(t *testing.T) {
+	// jobQueueをHA分離 → sentinel trigger、listName override
+	m := newMisskey()
+	m.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{JobQueue: &misskeyv1alpha1.RedisRole{HA: &misskeyv1alpha1.RedisHA{}}}
+	a := &misskeyv1alpha1.AutoscalingSpec{
+		MaxReplicas: 20,
+		Queues:      []misskeyv1alpha1.QueueScaleTrigger{{Name: "deliver", ListLength: 1000, ListName: "custom:deliver:wait"}},
+	}
+	so := buildScaledObject(m, roleWorker, "example-worker", a, jobQueueEndpoint(resolve(m)))
+	spec := so.Object["spec"].(map[string]any)
+	if _, ok := spec["minReplicaCount"]; ok {
+		t.Errorf("minReplicas unset must omit minReplicaCount: %v", spec["minReplicaCount"])
+	}
+	trig := scaledObjectTriggers(spec)[0].(map[string]any)
+	if trig["type"] != "redis-sentinel" {
+		t.Errorf("HA jobQueue must use redis-sentinel trigger: %v", trig["type"])
+	}
+	meta := trig["metadata"].(map[string]any)
+	if meta["addresses"] != "example-redis-jobqueue-sentinel.ns.svc:26379" || meta["sentinelMaster"] != "mymaster" {
+		t.Errorf("sentinel meta wrong (FQDN): %+v", meta)
+	}
+	if meta["listName"] != "custom:deliver:wait" {
+		t.Errorf("listName override ignored: %v", meta["listName"])
+	}
+}
