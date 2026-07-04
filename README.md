@@ -280,7 +280,7 @@ make fmt vet
 - 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、次回の変更かresync時になります(app等のnative resourceはOwns()でwatch・即時是正)。
 - statusはappの可用性で`Ready`/`Phase`を判定します。worker/Redis/MeiliSearch/DBの集約までは行いません。
 - appのオートスケールはCPU/memory(native HPA)のみです。RPSベース(Prometheus + KEDA prometheus trigger)は将来対応です。
-- `url`/`idGenerationMethod`/`tenant`のimmutable検証を行うvalidating webhookは未実装です。`tenant`は設定後の変更をCELで弾きますが、未設定から初回設定するケースは素通りするため、生成時に確定させてください。
+- Validating/Mutating webhookを`config/default-webhook`(cert-manager必須、opt-in)で提供します。`url`/`idGenerationMethod`/`tenant`のimmutable検証、managed/external排他やautoscaling範囲等のcross-field検証、tenant未設定→namespace確定のdefaultingを行います。cert-manager無しなら`config/default`(webhook無し)を使い`ENABLE_WEBHOOKS=false`で無効化します。
 - egress隔離は`spec.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(private/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。
 - PostgreSQL(CNPG)は隔離NetworkPolicyの対象外です。CNPG operatorが別namespaceからinstance manager(:8000)へ接続するため意図的に除外しており、DBのネットワーク保護はCNPG/platform側に委ねます。backend隔離下で監視namespaceからscrapeするには`networkIsolation.allowedNamespaces`で明示的に開けてください。
 - MeiliSearchは公式に水平スケール機構がないため、単一レプリカで動かします。

@@ -34,6 +34,7 @@ import (
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 	"github.com/chan-mai/cloud-native-misskey/internal/controller"
+	webhookv1alpha1 "github.com/chan-mai/cloud-native-misskey/internal/webhook/v1alpha1"
 )
 
 var (
@@ -100,6 +101,14 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Misskey")
 		os.Exit(1)
+	}
+
+	// webhookはcert必須のためlocal実行等ではENABLE_WEBHOOKS=falseで無効化
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err := webhookv1alpha1.SetupMisskeyWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "Misskey")
+			os.Exit(1)
+		}
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
