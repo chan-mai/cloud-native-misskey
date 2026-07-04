@@ -24,9 +24,21 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
+
+func TestPoolerIgnoreStartupParameters(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Postgres.Pooler = &misskeyv1alpha1.PostgresPooler{}
+	u := buildPooler(m, nameDBPoolerRW(m), "rw")
+	params, _, _ := unstructured.NestedStringMap(u.Object, "spec", "pgbouncer", "parameters")
+	// transaction pooling下でMisskeyのstatement_timeoutを無視しないと接続失敗する回帰防止
+	if !strings.Contains(params["ignore_startup_parameters"], "statement_timeout") {
+		t.Errorf("pooler must ignore statement_timeout: %v", params)
+	}
+}
 
 func newMisskey() *misskeyv1alpha1.Misskey {
 	return &misskeyv1alpha1.Misskey{

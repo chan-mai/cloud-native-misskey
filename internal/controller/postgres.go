@@ -183,6 +183,9 @@ func buildPooler(m *misskeyv1alpha1.Misskey, name, poolerType string) *unstructu
 	params := map[string]any{
 		"max_client_conn":   "1000",
 		"default_pool_size": "25",
+		// transaction poolingでMisskey(node-postgres)が送るstartup paramを無視
+		// 無いとstatement_timeoutで"unsupported startup parameter"となりapp接続失敗
+		"ignore_startup_parameters": "statement_timeout,extra_float_digits,search_path,options,idle_in_transaction_session_timeout",
 	}
 	for k, v := range pc.Parameters {
 		params[k] = v
