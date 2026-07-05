@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -67,6 +68,7 @@ func (r *MisskeyReconciler) event(m *misskeyv1alpha1.Misskey, eventType, reason,
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;persistentvolumeclaims;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters;scheduledbackups;poolers,verbs=get;list;watch;create;update;patch;delete
@@ -151,6 +153,74 @@ func (r *MisskeyReconciler) databaseCondition(ctx context.Context, m *misskeyv1a
 		return metav1.ConditionTrue, "Ready", msg
 	}
 	return metav1.ConditionFalse, "Progressing", msg
+}
+
+// redisCondition: managed redisインスタンスの可用性を集約
+// standaloneはSTSのreadyReplicas、HAはOT operator管理podのready数をappラベルで判定
+// (既存NP/PodMonitorと同じラベル依存)。managedが無い(全external)場合はTrue
+func (r *MisskeyReconciler) redisCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
+	instances := managedRedisInstances(m)
+	if len(instances) == 0 {
+		return metav1.ConditionTrue, "External", "外部Redis"
+	}
+	msgs := make([]string, 0, len(instances))
+	allReady := true
+	for _, inst := range instances {
+		name := nameRedisInstance(m, inst.suffix)
+		var ready, desired int32
+		if inst.ha {
+			desired = inst.replicas
+			ready = r.readyPodsByAppLabel(ctx, m.Namespace, name)
+		} else {
+			desired = 1
+			sts := &appsv1.StatefulSet{}
+			if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, sts); err == nil {
+				ready = sts.Status.ReadyReplicas
+			}
+		}
+		if ready < desired {
+			allReady = false
+		}
+		msgs = append(msgs, fmt.Sprintf("%s %d/%d", name, ready, desired))
+	}
+	msg := strings.Join(msgs, ", ")
+	if allReady {
+		return metav1.ConditionTrue, "Ready", msg
+	}
+	return metav1.ConditionFalse, "Progressing", msg
+}
+
+// readyPodsByAppLabel: app=<name>のpodのうちReadyな数
+func (r *MisskeyReconciler) readyPodsByAppLabel(ctx context.Context, ns, app string) int32 {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels{"app": app}); err != nil {
+		return 0
+	}
+	var ready int32
+	for i := range pods.Items {
+		for _, c := range pods.Items[i].Status.Conditions {
+			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+				ready++
+				break
+			}
+		}
+	}
+	return ready
+}
+
+// searchCondition: managed MeiliSearchのSTS可用性。external=True(meilisearch以外はcondition自体を外す)
+func (r *MisskeyReconciler) searchCondition(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) (metav1.ConditionStatus, string, string) {
+	if !p.meiliManaged {
+		return metav1.ConditionTrue, "External", "外部MeiliSearch"
+	}
+	sts := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, types.NamespacedName{Name: nameMeili(m), Namespace: m.Namespace}, sts); err != nil {
+		return metav1.ConditionFalse, "Pending", "MeiliSearch StatefulSet未作成"
+	}
+	if sts.Status.ReadyReplicas >= 1 {
+		return metav1.ConditionTrue, "Ready", "1/1 ready"
+	}
+	return metav1.ConditionFalse, "Progressing", "0/1 ready"
 }
 
 // migrationCondition: 現行migration Jobの状態
@@ -268,6 +338,14 @@ func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1
 
 	dbSt, dbR, dbM := r.databaseCondition(ctx, m, p)
 	set = append(set, cnd{"DatabaseReady", dbSt, dbR, dbM})
+	rdSt, rdR, rdM := r.redisCondition(ctx, m)
+	set = append(set, cnd{"RedisReady", rdSt, rdR, rdM})
+	if p.meiliEnabled {
+		seSt, seR, seM := r.searchCondition(ctx, m, p)
+		set = append(set, cnd{"SearchReady", seSt, seR, seM})
+	} else {
+		remove = append(remove, "SearchReady")
+	}
 	mSt, mR, mM := r.migrationCondition(ctx, m)
 	set = append(set, cnd{"MigrationComplete", mSt, mR, mM})
 	aSt, aR, aM := r.deploymentReady(ctx, m, nameApp(m))

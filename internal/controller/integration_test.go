@@ -157,6 +157,15 @@ func TestReconcileIntegration(t *testing.T) {
 	if !hasCondition(cur, "MigrationComplete", metav1.ConditionFalse) {
 		t.Errorf("MigrationComplete!=False: %+v", cur.Status.Conditions)
 	}
+	// external redisはRedisReady=True、sqlLikeはSearchReadyなし
+	if !hasCondition(cur, "RedisReady", metav1.ConditionTrue) {
+		t.Errorf("RedisReady!=True (external): %+v", cur.Status.Conditions)
+	}
+	for _, c := range cur.Status.Conditions {
+		if c.Type == "SearchReady" {
+			t.Errorf("sqlLikeでSearchReadyが存在: %+v", c)
+		}
+	}
 
 	// status: 解決済み接続先(external host/redis, indexはsqlLikeで空)
 	if cur.Status.DatabaseHost != "pg" {
