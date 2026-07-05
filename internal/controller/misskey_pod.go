@@ -60,13 +60,15 @@ func renderInitEnv(p plan) []corev1.EnvVar {
 }
 
 // default.ymlの${...}シークレットプレースホルダをリテラル文字列置換で展開するNode.jsプログラム
-// String.split(literal).join(value)により、|, &, \, $, 改行を含む値で以前のsedパイプラインが壊れる(またはインジェクションを許す)原因の正規表現・シェル解釈を回避
+// String.split(literal).join(value)により、正規表現・シェル解釈(sed時代のインジェクション経路)を回避
+// 値はJSON.stringifyでquoteして埋め込む。JSON文字列はYAML double-quoted scalarとして常に妥当なため、
+// 改行・#・引用符等を含む外部Secret値でもYAML破損やキー注入が起きない
 // MisskeyイメージにNode同梱のため追加のツールイメージは不要
 const renderConfigScript = `const fs = require('fs');
 let s = fs.readFileSync('/tpl/default.yml', 'utf8');
 for (const k of ['DB_PASSWORD', 'MEILI_KEY', 'REDIS_PASSWORD', 'REDIS_PASSWORD_JOBQUEUE', 'REDIS_PASSWORD_PUBSUB', 'REDIS_PASSWORD_TIMELINES', 'REDIS_PASSWORD_REACTIONS', 'SETUP_PASSWORD']) {
   const v = process.env[k];
-  if (v !== undefined) s = s.split('${' + k + '}').join(v);
+  if (v !== undefined) s = s.split('${' + k + '}').join(JSON.stringify(v));
 }
 fs.writeFileSync('/shared/default.yml', s);`
 

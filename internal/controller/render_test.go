@@ -276,6 +276,10 @@ func TestRenderConfigScriptIsLiteral(t *testing.T) {
 	if strings.Contains(renderConfigScript, "sed") {
 		t.Errorf("render script must not shell out to sed")
 	}
+	// 値はJSON.stringifyでquoteし、改行・#等を含む値でもYAMLとして安全に埋め込む
+	if !strings.Contains(renderConfigScript, "JSON.stringify(v)") {
+		t.Errorf("render script must JSON-quote values for YAML safety")
+	}
 }
 
 func TestChecksumAnnotation(t *testing.T) {
