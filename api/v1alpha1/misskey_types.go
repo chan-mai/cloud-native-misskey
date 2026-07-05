@@ -323,15 +323,11 @@ type ComponentSpec struct {
 	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
 }
 
-// AutoscalingSpec configures autoscaling for an app/worker Deployment. When
-// Queues is empty a native HPA is created (CPU/memory); when Queues is set a
-// KEDA ScaledObject is created that scales on BullMQ wait-list depth.
+// AutoscalingSpec configures autoscaling for an app/worker Deployment. Presence
+// of the block enables autoscaling; omit it for static replicas. When Queues is
+// empty a native HPA is created (CPU/memory); when Queues is set a KEDA
+// ScaledObject is created that scales on BullMQ wait-list depth.
 type AutoscalingSpec struct {
-	// Enabled toggles autoscaling when the block is present.
-	// +kubebuilder:default=true
-	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
-
 	// MinReplicas is the lower bound. Default 1; use >=2 so the PodDisruptionBudget
 	// (maxUnavailable=1) still allows node drains.
 	// +kubebuilder:validation:Minimum=0
@@ -523,13 +519,9 @@ type RedisSpec struct {
 	Roles *RedisRoles `json:"roles,omitempty"`
 }
 
-// RedisHA configures operator-managed Sentinel high availability.
+// RedisHA configures operator-managed Sentinel high availability. Presence of
+// the block enables HA; omit it for a single-pod Redis.
 type RedisHA struct {
-	// Enabled toggles HA when the block is present.
-	// +kubebuilder:default=true
-	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
-
 	// Replicas is the RedisReplication cluster size: total redis nodes
 	// (1 primary + N-1 replicas). 3 gives one primary and two replicas.
 	// +kubebuilder:default=3
@@ -595,7 +587,9 @@ type RedisRole struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// HA override for this role's managed instance. Nil inherits spec.redis.ha.
+	// HA turns this role's managed instance into a Sentinel HA setup. Presence
+	// enables HA for this role independently; omit for a single-pod instance.
+	// (spec.redis.ha applies to the shared default redis, not to roles.)
 	// +optional
 	HA *RedisHA `json:"ha,omitempty"`
 }
@@ -785,11 +779,6 @@ type PostgresSpec struct {
 // operator creates a read-write pooler and, when read offload is active, a
 // read-only pooler.
 type PostgresPooler struct {
-	// Enabled toggles the poolers when the block is present.
-	// +kubebuilder:default=true
-	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
-
 	// Instances is the PgBouncer pod count per pooler.
 	// +kubebuilder:default=2
 	// +kubebuilder:validation:Minimum=1

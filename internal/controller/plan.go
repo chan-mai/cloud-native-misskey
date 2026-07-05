@@ -151,11 +151,8 @@ func resolve(m *misskeyv1alpha1.Misskey) plan {
 				p.redisRoles[rd.key] = externalRedisEndpoint(role.External, rd.passEnv)
 			} else {
 				p.redisManaged = true
-				ha := role.HA
-				if ha == nil {
-					ha = defaultHA // roleでHA未指定ならdefaultを継承
-				}
-				p.redisRoles[rd.key] = managedRedisEndpoint(m, rd.nameSuffix, rd.passEnv, ha)
+				// role単位で独立(role.ha存在=HA)。redis.haの継承はしない
+				p.redisRoles[rd.key] = managedRedisEndpoint(m, rd.nameSuffix, rd.passEnv, role.HA)
 			}
 		}
 	}
@@ -229,7 +226,7 @@ func externalRedisEndpoint(ext *misskeyv1alpha1.ExternalRedis, passEnv string) r
 // managedRedisEndpoint: operator管理redisのendpoint。HA有効でSentinelモード(sentinels+masterName)
 // HAはrequirepass認証あり(passSel=<name>-redis-auth)。standaloneは認証なし(NP保護)
 func managedRedisEndpoint(m *misskeyv1alpha1.Misskey, suffix, passEnv string, ha *misskeyv1alpha1.RedisHA) redisEndpoint {
-	if ha != nil && boolOr(ha.Enabled, true) {
+	if ha != nil {
 		return redisEndpoint{
 			// host/portはioredisのsentinelモードでは無視されるがMisskeyのschema上必須
 			host:       nameRedisInstance(m, suffix),

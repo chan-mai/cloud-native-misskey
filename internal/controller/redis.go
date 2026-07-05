@@ -78,11 +78,8 @@ func managedRedisInstances(m *misskeyv1alpha1.Misskey) []redisManagedInstance {
 			if role == nil || role.External != nil {
 				continue
 			}
-			ha := role.HA
-			if ha == nil {
-				ha = rs.HA // role未指定はdefaultのHAを継承
-			}
-			out = append(out, buildManagedInstance(m, rd.nameSuffix, role, ha))
+			// role単位で独立(ポインタ存在=有効)。role.ha無しはstandalone、redis.haの継承はしない
+			out = append(out, buildManagedInstance(m, rd.nameSuffix, role, role.HA))
 		}
 	}
 	return out
@@ -115,7 +112,7 @@ func buildManagedInstance(m *misskeyv1alpha1.Misskey, suffix string, role *missk
 			inst.resources = role.Resources
 		}
 	}
-	if ha != nil && boolOr(ha.Enabled, true) {
+	if ha != nil {
 		inst.ha = true
 		inst.replicas = int32OrDefault(ha.Replicas, 3)
 		inst.sentinels = int32OrDefault(ha.Sentinels, 3)

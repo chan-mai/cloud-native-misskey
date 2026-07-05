@@ -215,15 +215,15 @@ spec:
 
 ### 役割別分離 (`redis.roles`)
 
-BullMQ job queue/pubsub/timeline/reactionを役割別Redisに分けて、単一coreのボトルネックを緩和します。未指定の役割は共有redisにfallbackします。各役割は専用managedインスタンス(`ha`継承)かexternal参照を選べます。
+BullMQ job queue/pubsub/timeline/reactionを役割別Redisに分けて、単一coreのボトルネックを緩和します。未指定の役割は共有redisにfallbackします。各役割は専用managedインスタンスかexternal参照を選べます。HAは役割ごとに独立で、`redis.ha`は共有default redis専用です(役割は自分の`ha`を持つときだけHA)。
 
 ```yaml
 spec:
   redis:
-    ha: {}
+    ha: {}               # 共有default redisをHAに
     roles:
-      jobQueue: {}                       # 専用managed(default HA継承)
-      pubsub: { ha: { enabled: false } } # 専用standalone
+      jobQueue: { ha: {} } # 専用managed HA
+      pubsub: {}           # 専用managed standalone(haを持たない)
       # timelines/reactions未指定 → 共有redisにfallback
 ```
 

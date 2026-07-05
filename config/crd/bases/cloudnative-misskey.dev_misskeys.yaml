@@ -64,11 +64,6 @@ spec:
                       (CPU/memory) or, when queues are set, a KEDA ScaledObject (BullMQ queue
                       depth). HPA needs metrics-server; queue scaling needs KEDA installed.
                     properties:
-                      enabled:
-                        default: true
-                        description: Enabled toggles autoscaling when the block is
-                          present.
-                        type: boolean
                       maxReplicas:
                         description: MaxReplicas is the upper bound.
                         format: int32
@@ -558,11 +553,6 @@ spec:
                       multiplexing app/worker connections so max_connections is not exhausted as
                       pods scale out.
                     properties:
-                      enabled:
-                        default: true
-                        description: Enabled toggles the poolers when the block is
-                          present.
-                        type: boolean
                       instances:
                         default: 2
                         description: Instances is the PgBouncer pod count per pooler.
@@ -918,10 +908,6 @@ spec:
                       OT-CONTAINER-KIT redis-operator) for managed Redis instances instead of a
                       single-pod StatefulSet. Requires the redis-operator installed in the cluster.
                     properties:
-                      enabled:
-                        default: true
-                        description: Enabled toggles HA when the block is present.
-                        type: boolean
                       image:
                         default: quay.io/opstree/redis:v8.2.5
                         description: Image is the redis image driven by the operator's
@@ -1109,14 +1095,11 @@ spec:
                             - host
                             type: object
                           ha:
-                            description: HA override for this role's managed instance.
-                              Nil inherits spec.redis.ha.
+                            description: |-
+                              HA turns this role's managed instance into a Sentinel HA setup. Presence
+                              enables HA for this role independently; omit for a single-pod instance.
+                              (spec.redis.ha applies to the shared default redis, not to roles.)
                             properties:
-                              enabled:
-                                default: true
-                                description: Enabled toggles HA when the block is
-                                  present.
-                                type: boolean
                               image:
                                 default: quay.io/opstree/redis:v8.2.5
                                 description: Image is the redis image driven by the
@@ -1296,14 +1279,11 @@ spec:
                             - host
                             type: object
                           ha:
-                            description: HA override for this role's managed instance.
-                              Nil inherits spec.redis.ha.
+                            description: |-
+                              HA turns this role's managed instance into a Sentinel HA setup. Presence
+                              enables HA for this role independently; omit for a single-pod instance.
+                              (spec.redis.ha applies to the shared default redis, not to roles.)
                             properties:
-                              enabled:
-                                default: true
-                                description: Enabled toggles HA when the block is
-                                  present.
-                                type: boolean
                               image:
                                 default: quay.io/opstree/redis:v8.2.5
                                 description: Image is the redis image driven by the
@@ -1483,14 +1463,11 @@ spec:
                             - host
                             type: object
                           ha:
-                            description: HA override for this role's managed instance.
-                              Nil inherits spec.redis.ha.
+                            description: |-
+                              HA turns this role's managed instance into a Sentinel HA setup. Presence
+                              enables HA for this role independently; omit for a single-pod instance.
+                              (spec.redis.ha applies to the shared default redis, not to roles.)
                             properties:
-                              enabled:
-                                default: true
-                                description: Enabled toggles HA when the block is
-                                  present.
-                                type: boolean
                               image:
                                 default: quay.io/opstree/redis:v8.2.5
                                 description: Image is the redis image driven by the
@@ -1670,14 +1647,11 @@ spec:
                             - host
                             type: object
                           ha:
-                            description: HA override for this role's managed instance.
-                              Nil inherits spec.redis.ha.
+                            description: |-
+                              HA turns this role's managed instance into a Sentinel HA setup. Presence
+                              enables HA for this role independently; omit for a single-pod instance.
+                              (spec.redis.ha applies to the shared default redis, not to roles.)
                             properties:
-                              enabled:
-                                default: true
-                                description: Enabled toggles HA when the block is
-                                  present.
-                                type: boolean
                               image:
                                 default: quay.io/opstree/redis:v8.2.5
                                 description: Image is the redis image driven by the
@@ -2139,11 +2113,6 @@ spec:
                       (CPU/memory) or, when queues are set, a KEDA ScaledObject (BullMQ queue
                       depth). HPA needs metrics-server; queue scaling needs KEDA installed.
                     properties:
-                      enabled:
-                        default: true
-                        description: Enabled toggles autoscaling when the block is
-                          present.
-                        type: boolean
                       maxReplicas:
                         description: MaxReplicas is the upper bound.
                         format: int32

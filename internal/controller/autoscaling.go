@@ -40,7 +40,7 @@ var (
 
 // autoscalingEnabled: autoscalingブロックがあり有効か
 func autoscalingEnabled(a *misskeyv1alpha1.AutoscalingSpec) bool {
-	return a != nil && boolOr(a.Enabled, true)
+	return a != nil
 }
 
 // autoscalingUsesKEDA: queue trigger指定でKEDA、なければnative HPA

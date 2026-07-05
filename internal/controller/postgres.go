@@ -41,7 +41,7 @@ var (
 
 // poolerEnabled: spec.postgres.poolerが在ればenabled(default true)
 func poolerEnabled(m *misskeyv1alpha1.Misskey) bool {
-	return m.Spec.Postgres.Pooler != nil && boolOr(m.Spec.Postgres.Pooler.Enabled, true)
+	return m.Spec.Postgres.Pooler != nil
 }
 
 // readOffloadActive: replicaが居る(instances>=2)かつreadOffloadがopt-outされていない

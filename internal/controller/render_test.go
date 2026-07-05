@@ -563,13 +563,10 @@ func TestPoolerHelpers(t *testing.T) {
 	if poolerEnabled(m) {
 		t.Error("pooler未指定はdisabled")
 	}
+	// ポインタ存在=有効(内側Enabledは廃止)
 	m.Spec.Postgres.Pooler = &misskeyv1alpha1.PostgresPooler{}
 	if !poolerEnabled(m) {
-		t.Error("pooler指定(既定)はenabled")
-	}
-	m.Spec.Postgres.Pooler.Enabled = boolPtr(false)
-	if poolerEnabled(m) {
-		t.Error("enabled=falseでdisabled")
+		t.Error("pooler block存在でenabled")
 	}
 }
 
@@ -683,10 +680,14 @@ func TestRenderRedisBlockSentinel(t *testing.T) {
 func TestRenderDefaultYMLRedisRolesAndHA(t *testing.T) {
 	m := newMisskey()
 	m.Spec.Redis.HA = &misskeyv1alpha1.RedisHA{}
-	m.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{JobQueue: &misskeyv1alpha1.RedisRole{}}
+	// role単位で独立: jobQueueは自分のhaでHA、pubsubはha無しでstandalone
+	m.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{
+		JobQueue: &misskeyv1alpha1.RedisRole{HA: &misskeyv1alpha1.RedisHA{}},
+		Pubsub:   &misskeyv1alpha1.RedisRole{},
+	}
 	out := renderDefaultYML(m, resolve(m))
-	// default redisはHA sentinel、jobQueueは分離(HA継承でsentinel)
-	for _, s := range []string{"redis:", "sentinels:", "name: mymaster", "redisForJobQueue:", "host: example-redis-jobqueue-sentinel"} {
+	// default redisとjobQueueはHA sentinel、pubsubはstandalone(sentinelなし)
+	for _, s := range []string{"redis:", "sentinels:", "name: mymaster", "redisForJobQueue:", "host: example-redis-jobqueue-sentinel", "redisForPubsub:", "host: example-redis-pubsub"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("expected %q in\n%s", s, out)
 		}
@@ -839,13 +840,10 @@ func TestAutoscalingHelpers(t *testing.T) {
 	if autoscalingEnabled(nil) {
 		t.Error("nil autoscaling must be disabled")
 	}
+	// ポインタ存在=有効(内側Enabledは廃止)
 	a := &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 5}
 	if !autoscalingEnabled(a) {
-		t.Error("present block defaults enabled")
-	}
-	a.Enabled = boolPtr(false)
-	if autoscalingEnabled(a) {
-		t.Error("enabled=false must disable")
+		t.Error("present block is enabled")
 	}
 	if autoscalingUsesKEDA(&misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 5}) {
 		t.Error("no queues → native HPA")
