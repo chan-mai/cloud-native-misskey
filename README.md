@@ -31,9 +31,9 @@ flowchart TD
 
 ## コンポーネント
 
-- **app**(`MK_ONLY_SERVER=true`)と**worker**(`MK_ONLY_QUEUE=true`)は同一imageを共有します。initContainerで`built/`をwritableなemptyDirにコピーし、`default.yml`の`${DB_PASSWORD}`/`${MEILI_KEY}`/`${SETUP_PASSWORD}`をsed展開します。シークレット値はConfigMapには載せません。
+- **app**(`MK_ONLY_SERVER=true`)と**worker**(`MK_ONLY_QUEUE=true`)は同一imageを共有します。initContainerで`built/`をwritableなemptyDirにコピーし、`default.yml`の`${DB_PASSWORD}`/`${MEILI_KEY}`/`${REDIS_PASSWORD}`系/`${SETUP_PASSWORD}`をNodeスクリプトのリテラル置換(JSON quote)で展開します。シークレット値はConfigMapに載らず、改行や`#`等を含む値でもYAMLとして安全です。
 - **proxy**はCaddyでappに転送し、backend down時はmaintenanceにfallbackします。`proxy.enabled: false`で無効化でき、そのときIngressはappを直接指します。TLS終端は前段に委ねる前提で、plain HTTPで動きます。
-- **Redis**は`redis:7-alpine`を使い、`maxmemory`と`allkeys-lru`を設定します。`redis.external`で外部参照もできます。
+- **Redis**は`redis:8-alpine`(Redis 8を要件とする)を使い、`maxmemory`(既定400mb)と`maxmemory-policy`(既定`noeviction`)を設定し、job queue耐久化のためAOFを既定で有効にします。`redis.external`で外部参照もできます。
 - **MeiliSearch**のmaster keyは、未指定なら自動生成して`<name>-meilisearch` Secretに保存します。
 - **PostgreSQL**はCNPGの`Cluster`を生成します。app用の認証情報`<name>-db-app` SecretはCNPGが払い出し、Misskeyはそこからパスワードを読みます。`postgres.external`で外部DB参照もできます。
 
@@ -288,12 +288,13 @@ make fmt vet
 
 ## 制限事項/TODO
 
-- 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、次回の変更かresync時になります(app等のnative resourceはOwns()でwatch・即時是正)。
+- 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、次回の変更かresync時になります(Deployment/NetworkPolicy/PDB等のnative resourceはOwns()でwatch・即時是正)。
+- migration Jobが失敗し切った場合(BackoffLimit超過)、DB接続先やmigrationフラグ等のspec変更時は自動で作り直されます。同一設定のまま再試行するには`kubectl delete job <name>-migrate-<hash>`で削除すると、次のreconcileで再生成されます(同一入力の失敗を無限リトライしないのは、`createIndexConcurrently`失敗時のinvalid index堆積等を避けるためです)。
 - statusはappの可用性で`Ready`/`Phase`を判定します。worker/Redis/MeiliSearch/DBの集約までは行いません。
 - appのオートスケールはCPU/memory(native HPA)のみです。RPSベース(Prometheus + KEDA prometheus trigger)は将来対応です。
 - immutable検証(`url`/`idGenerationMethod`/`tenant`)とcross-field整合(managed/external排他、pooler/backupのmanaged必須、autoscaling min<=max、redis role排他)はCRDのCEL(`x-kubernetes-validations`)で**常時**強制します。APIサーバが直接弾くため、webhook未導入でも効きます。
-- webhook(`config/default-webhook`、cert-manager必須、opt-in)はCELで表せない補助のみを担います: `tenant`未設定→namespace確定のdefaulting(「未設定→初回設定」の穴塞ぎ)と、エラーにしない警告(external DBで`readOffload`無効、等)。cert-manager無しなら`config/default`(webhook無し)を使い`ENABLE_WEBHOOKS=false`で無効化できます。この場合`tenant`は生成時に明示してください(defaultingが効かないため)。
-- egress隔離は`spec.network.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(private/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`network.egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。
+- webhook(`config/default-webhook`、cert-manager必須、opt-in)はCELで表せない補助のみを担います: `tenant`未設定→namespace確定のdefaulting(「未設定→初回設定」の穴塞ぎ)と、エラーにしない警告(external DBで`readOffload`無効、等)。cert-manager無しなら`config/default`(webhook無し)を使います。manager側は`ENABLE_WEBHOOKS=false`が設定済みで、`config/default-webhook`のpatchが`true`へ上書きします。webhook無しの場合`tenant`は生成時に明示してください(defaultingが効かないため)。
+- egress隔離は`spec.network.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(RFC1918/CGNAT/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`network.egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。public許可ルールはIPv4のみ対応で、dual-stackクラスタではIPv6のegressは遮断されます(IPv6で連合する場合は注意)。
 - PostgreSQL(CNPG)は隔離NetworkPolicyの対象外です。CNPG operatorが別namespaceからinstance manager(:8000)へ接続するため意図的に除外しており、DBのネットワーク保護はCNPG/platform側に委ねます。backend隔離下で監視namespaceからscrapeするには`network.isolation.allowedNamespaces`で明示的に開けてください。
 - **オブジェクトストレージ(media)は本Operatorの責務外です。** これは、Misskeyのオブジェクトストレージ設定はコントロールパネルで行うものであり、`default.yml`から宣言的に投入できないためです。未設定時のアップロードファイルはpodローカル(emptyDir)に置かれ、**pod再起動で消え、複数レプリカ間でも共有されません**。よって`app.replicas>1`で運用する場合は、初期セットアップ後にオブジェクトストレージを設定してください。
 - MeiliSearchは公式に水平スケール機構がないため、単一レプリカで動かします。
