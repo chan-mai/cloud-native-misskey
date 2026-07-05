@@ -121,7 +121,7 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *MisskeyReconciler) deploymentReady(ctx context.Context, m *misskeyv1alpha1.Misskey, name string) (metav1.ConditionStatus, string, string) {
 	dep := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, dep); err != nil {
-		return metav1.ConditionFalse, "NotCreated", "Deployment未作成"
+		return metav1.ConditionFalse, "NotCreated", "Deployment not created"
 	}
 	desired := int32(1)
 	if dep.Spec.Replicas != nil {
@@ -140,12 +140,12 @@ func (r *MisskeyReconciler) deploymentReady(ctx context.Context, m *misskeyv1alp
 // databaseCondition: managed CNPGのreadyInstances判定、external=True
 func (r *MisskeyReconciler) databaseCondition(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) (metav1.ConditionStatus, string, string) {
 	if !p.dbManaged {
-		return metav1.ConditionTrue, "External", "外部DB"
+		return metav1.ConditionTrue, "External", "external database"
 	}
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(cnpgClusterGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: nameDB(m), Namespace: m.Namespace}, cluster); err != nil {
-		return metav1.ConditionFalse, "Pending", "CNPG Cluster未作成"
+		return metav1.ConditionFalse, "Pending", "CNPG Cluster not created"
 	}
 	ready, _, _ := unstructured.NestedInt64(cluster.Object, "status", "readyInstances")
 	desired := int64(int32OrDefault(m.Spec.Postgres.Instances, 1))
@@ -162,7 +162,7 @@ func (r *MisskeyReconciler) databaseCondition(ctx context.Context, m *misskeyv1a
 func (r *MisskeyReconciler) redisCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
 	instances := managedRedisInstances(m)
 	if len(instances) == 0 {
-		return metav1.ConditionTrue, "External", "外部Redis"
+		return metav1.ConditionTrue, "External", "external Redis"
 	}
 	msgs := make([]string, 0, len(instances))
 	allReady := true
@@ -212,11 +212,11 @@ func (r *MisskeyReconciler) readyPodsByAppLabel(ctx context.Context, ns, app str
 // searchCondition: managed MeiliSearchのSTS可用性。external=True(meilisearch以外はcondition自体を外す)
 func (r *MisskeyReconciler) searchCondition(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) (metav1.ConditionStatus, string, string) {
 	if !p.meiliManaged {
-		return metav1.ConditionTrue, "External", "外部MeiliSearch"
+		return metav1.ConditionTrue, "External", "external MeiliSearch"
 	}
 	sts := &appsv1.StatefulSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: nameMeili(m), Namespace: m.Namespace}, sts); err != nil {
-		return metav1.ConditionFalse, "Pending", "MeiliSearch StatefulSet未作成"
+		return metav1.ConditionFalse, "Pending", "MeiliSearch StatefulSet not created"
 	}
 	if sts.Status.ReadyReplicas >= 1 {
 		return metav1.ConditionTrue, "Ready", "1/1 ready"
@@ -228,15 +228,15 @@ func (r *MisskeyReconciler) searchCondition(ctx context.Context, m *misskeyv1alp
 func (r *MisskeyReconciler) migrationCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
 	job := &batchv1.Job{}
 	if err := r.Get(ctx, types.NamespacedName{Name: nameMigrate(m), Namespace: m.Namespace}, job); err != nil {
-		return metav1.ConditionFalse, "Pending", "migration Job未作成"
+		return metav1.ConditionFalse, "Pending", "migration Job not created"
 	}
 	switch {
 	case job.Status.Succeeded >= 1:
-		return metav1.ConditionTrue, "Complete", "migration完了"
+		return metav1.ConditionTrue, "Complete", "migration complete"
 	case job.Status.Failed >= 1:
-		return metav1.ConditionFalse, "Failed", fmt.Sprintf("migration Job失敗 (%d)", job.Status.Failed)
+		return metav1.ConditionFalse, "Failed", fmt.Sprintf("migration Job failed (%d)", job.Status.Failed)
 	default:
-		return metav1.ConditionFalse, "Running", "migration実行中"
+		return metav1.ConditionFalse, "Running", "migration running"
 	}
 }
 
@@ -244,9 +244,9 @@ func (r *MisskeyReconciler) migrationCondition(ctx context.Context, m *misskeyv1
 func (r *MisskeyReconciler) ingressCondition(ctx context.Context, m *misskeyv1alpha1.Misskey) (metav1.ConditionStatus, string, string) {
 	ing := &networkingv1.Ingress{}
 	if err := r.Get(ctx, types.NamespacedName{Name: m.Name, Namespace: m.Namespace}, ing); err != nil {
-		return metav1.ConditionFalse, "Pending", "Ingress未作成"
+		return metav1.ConditionFalse, "Pending", "Ingress not created"
 	}
-	return metav1.ConditionTrue, "Created", "Ingress生成済み"
+	return metav1.ConditionTrue, "Created", "Ingress created"
 }
 
 // databaseReady: gate用。databaseConditionがTrueか
