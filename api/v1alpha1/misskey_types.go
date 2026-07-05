@@ -26,9 +26,10 @@ import (
 // MisskeySpec defines the desired state of a Misskey instance.
 type MisskeySpec struct {
 	// URL is the public-facing URL of the instance, e.g. https://misskey.example.com/.
-	// Do not change this after the instance has been initialized.
+	// Immutable after initialization (enforced by CEL, independent of the webhook).
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^https?://.+`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="url is immutable"
 	URL string `json:"url"`
 
 	// Image is the Misskey server container image. The app and worker share it.
@@ -40,6 +41,7 @@ type MisskeySpec struct {
 	// to the value the database was created with.
 	// +kubebuilder:validation:Enum=aid;aidx;meid;ulid;objectid
 	// +kubebuilder:default=aidx
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="idGenerationMethod is immutable"
 	// +optional
 	IDGenerationMethod string `json:"idGenerationMethod,omitempty"`
 
@@ -327,6 +329,7 @@ type ComponentSpec struct {
 // of the block enables autoscaling; omit it for static replicas. When Queues is
 // empty a native HPA is created (CPU/memory); when Queues is set a KEDA
 // ScaledObject is created that scales on BullMQ wait-list depth.
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must not exceed maxReplicas"
 type AutoscalingSpec struct {
 	// MinReplicas is the lower bound. Default 1; use >=2 so the PodDisruptionBudget
 	// (maxUnavailable=1) still allows node drains.
@@ -456,6 +459,7 @@ type IngressSpec struct {
 }
 
 // RedisSpec configures the Redis backend.
+// +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.ha))",message="HA requires managed Redis; remove redis.external"
 type RedisSpec struct {
 	// External points Misskey at an existing Redis. When set, no Redis is managed.
 	// +optional
@@ -484,13 +488,6 @@ type RedisSpec struct {
 	// +kubebuilder:default=true
 	// +optional
 	AppendOnly *bool `json:"appendOnly,omitempty"`
-
-	// NetworkPolicy toggles a NetworkPolicy that limits ingress to the managed
-	// Redis to app and worker pods. Default true. Only effective on CNIs that
-	// enforce NetworkPolicy.
-	// +kubebuilder:default=true
-	// +optional
-	NetworkPolicy *bool `json:"networkPolicy,omitempty"`
 
 	// Storage size of the managed Redis PVC.
 	// +kubebuilder:default="2Gi"
@@ -560,7 +557,8 @@ type RedisRoles struct {
 
 // RedisRole separates one Misskey Redis role. Presence separates the role;
 // External points it at an existing Redis, otherwise a dedicated instance is
-// provisioned (inheriting the default redis settings unless overridden here).
+// provisioned with the managed-override fields.
+// +kubebuilder:validation:XValidation:rule="!has(self.external) || !(has(self.ha) || has(self.maxMemory) || has(self.maxMemoryPolicy) || has(self.storage) || has(self.storageClassName) || has(self.resources))",message="external role cannot also set HA or managed overrides (maxMemory/storage/etc.)"
 type RedisRole struct {
 	// External points this role at an existing Redis. Mutually exclusive with the
 	// managed override fields.
@@ -715,6 +713,8 @@ type ExternalMeilisearch struct {
 }
 
 // PostgresSpec configures the PostgreSQL backend.
+// +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.pooler))",message="pooler requires managed PostgreSQL; remove postgres.external"
+// +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.backup))",message="backup requires managed PostgreSQL; remove postgres.external"
 type PostgresSpec struct {
 	// External points Misskey at an existing PostgreSQL. When set, CNPG is not used.
 	// +optional

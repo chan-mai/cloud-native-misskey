@@ -210,7 +210,7 @@ spec:
 ```
 
 - **認証**: operatorが`<name>-redis-auth` Secretにrandom passwordを生成し、Redis/Sentinel両方に`requirepass`を設定します。任意podからの無認証read/writeを防ぎます。
-- **隔離**: HA redis/sentinel podは`<name>-redis-ha` NetworkPolicyでapp/worker+intra-HA+`allowedNamespaces`のみに制限します(`redis.networkPolicy: false`で無効化)。
+- **隔離**: HA redis/sentinel podはoperator管理でinstance labelを持たず、通常の`networkIsolation`のNPに乗りません。その穴を埋める専用NP(`<name>-redis-ha`、app/worker+intra-HA+`allowedNamespaces`のみ許可)を`networkIsolation.enabled`と連動して生成します。standalone redisは通常どおり`networkIsolation`で保護します。
 - **前提**: redis-operatorのインストールと、network isolation有効時は`allowedNamespaces`にredis-operator(+KEDA)のnamespaceを含めること(前提節参照)。
 
 ### 役割別分離 (`redis.roles`)
@@ -283,7 +283,8 @@ make fmt vet
 - 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、次回の変更かresync時になります(app等のnative resourceはOwns()でwatch・即時是正)。
 - statusはappの可用性で`Ready`/`Phase`を判定します。worker/Redis/MeiliSearch/DBの集約までは行いません。
 - appのオートスケールはCPU/memory(native HPA)のみです。RPSベース(Prometheus + KEDA prometheus trigger)は将来対応です。
-- Validating/Mutating webhookを`config/default-webhook`(cert-manager必須、opt-in)で提供します。`url`/`idGenerationMethod`/`tenant`のimmutable検証、managed/external排他やautoscaling範囲等のcross-field検証、tenant未設定→namespace確定のdefaultingを行います。cert-manager無しなら`config/default`(webhook無し)を使い`ENABLE_WEBHOOKS=false`で無効化します。
+- immutable検証(`url`/`idGenerationMethod`/`tenant`)とcross-field整合(managed/external排他、pooler/backupのmanaged必須、autoscaling min<=max、redis role排他)はCRDのCEL(`x-kubernetes-validations`)で**常時**強制します。APIサーバが直接弾くため、webhook未導入でも効きます。
+- webhook(`config/default-webhook`、cert-manager必須、opt-in)はCELで表せない補助のみを担います: `tenant`未設定→namespace確定のdefaulting(「未設定→初回設定」の穴塞ぎ)と、エラーにしない警告(external DBで`readOffload`無効、等)。cert-manager無しなら`config/default`(webhook無し)を使い`ENABLE_WEBHOOKS=false`で無効化できます。この場合`tenant`は生成時に明示してください(defaultingが効かないため)。
 - egress隔離は`spec.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(private/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。
 - PostgreSQL(CNPG)は隔離NetworkPolicyの対象外です。CNPG operatorが別namespaceからinstance manager(:8000)へ接続するため意図的に除外しており、DBのネットワーク保護はCNPG/platform側に委ねます。backend隔離下で監視namespaceからscrapeするには`networkIsolation.allowedNamespaces`で明示的に開けてください。
 - **オブジェクトストレージ(media)は本Operatorの責務外です。** これは、Misskeyのオブジェクトストレージ設定はコントロールパネルで行うものであり、`default.yml`から宣言的に投入できないためです。未設定時のアップロードファイルはpodローカル(emptyDir)に置かれ、**pod再起動で消え、複数レプリカ間でも共有されません**。よって`app.replicas>1`で運用する場合は、初期セットアップ後にオブジェクトストレージを設定してください。

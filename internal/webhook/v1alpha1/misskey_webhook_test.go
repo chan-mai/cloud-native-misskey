@@ -19,13 +19,17 @@ package v1alpha1
 
 import (
 	"context"
+	"strings"
 	"testing"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
 )
+
+// immutable(url/id/tenant)やcross-field整合(external xor managed、min<=max等)は
+// CRDのCEL(XValidation)が常時強制するため、ここではwebhook固有の
+// defaulter/警告のみをテストする。CELルールはintegration_test.go(envtest)が検証する。
 
 func base() *misskeyv1alpha1.Misskey {
 	return &misskeyv1alpha1.Misskey{
@@ -59,57 +63,18 @@ func TestValidateCreateOK(t *testing.T) {
 	}
 }
 
-func TestValidatePoolerRequiresManaged(t *testing.T) {
-	v := &MisskeyCustomValidator{}
+func TestAdvisoryWarnings(t *testing.T) {
+	// external DB + readOffload → 効かない旨の警告(エラーではない)
 	m := base()
-	m.Spec.Postgres.External = &misskeyv1alpha1.ExternalPostgres{Host: "h"}
-	m.Spec.Postgres.Pooler = &misskeyv1alpha1.PostgresPooler{}
-	if _, err := v.ValidateCreate(context.Background(), m); !apierrors.IsInvalid(err) {
-		t.Errorf("pooler+external must be invalid, got %v", err)
+	on := true
+	m.Spec.Postgres.External = &misskeyv1alpha1.ExternalPostgres{Host: "h", Database: "d", User: "u"}
+	m.Spec.Postgres.ReadOffload = &on
+	warns := advisoryWarnings(m)
+	if len(warns) == 0 || !strings.Contains(strings.Join(warns, " "), "readOffload") {
+		t.Errorf("expected readOffload advisory warning, got %v", warns)
 	}
-}
-
-func TestValidateRedisHAExternal(t *testing.T) {
-	v := &MisskeyCustomValidator{}
-	m := base()
-	m.Spec.Redis.External = &misskeyv1alpha1.ExternalRedis{Host: "r"}
-	m.Spec.Redis.HA = &misskeyv1alpha1.RedisHA{}
-	if _, err := v.ValidateCreate(context.Background(), m); !apierrors.IsInvalid(err) {
-		t.Errorf("ha+external must be invalid, got %v", err)
-	}
-}
-
-func TestValidateAutoscalingRange(t *testing.T) {
-	v := &MisskeyCustomValidator{}
-	m := base()
-	min := int32(5)
-	m.Spec.Worker.Autoscaling = &misskeyv1alpha1.AutoscalingSpec{MinReplicas: &min, MaxReplicas: 3}
-	if _, err := v.ValidateCreate(context.Background(), m); !apierrors.IsInvalid(err) {
-		t.Errorf("min>max must be invalid, got %v", err)
-	}
-}
-
-func TestValidateImmutable(t *testing.T) {
-	v := &MisskeyCustomValidator{}
-	old := base()
-	old.Spec.Tenant = "ns"
-
-	urlChange := base()
-	urlChange.Spec.Tenant = "ns"
-	urlChange.Spec.URL = "https://other.example.com/"
-	if _, err := v.ValidateUpdate(context.Background(), old, urlChange); !apierrors.IsInvalid(err) {
-		t.Errorf("url change must be rejected: %v", err)
-	}
-
-	tenantChange := base()
-	tenantChange.Spec.Tenant = "acme"
-	if _, err := v.ValidateUpdate(context.Background(), old, tenantChange); !apierrors.IsInvalid(err) {
-		t.Errorf("tenant change must be rejected: %v", err)
-	}
-
-	noChange := base()
-	noChange.Spec.Tenant = "ns"
-	if _, err := v.ValidateUpdate(context.Background(), old, noChange); err != nil {
-		t.Errorf("unchanged update rejected: %v", err)
+	// 正常specは警告なし
+	if w := advisoryWarnings(base()); len(w) != 0 {
+		t.Errorf("clean spec must have no warnings: %v", w)
 	}
 }

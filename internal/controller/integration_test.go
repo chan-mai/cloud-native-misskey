@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -183,5 +184,82 @@ func TestReconcileIntegration(t *testing.T) {
 	}
 	if err := cl.Get(ctx, req.NamespacedName, &misskeyv1alpha1.Misskey{}); !apierrors.IsNotFound(err) {
 		t.Errorf("削除後もMisskeyが残存: %v", err)
+	}
+}
+
+// TestCELValidation: CRDのCEL(XValidation)がAPIサーバで常時強制されることを検証
+// webhook非依存でimmutable(url/id/tenant)とcross-field整合が効くこと
+func TestCELValidation(t *testing.T) {
+	ctx, cl, _ := setupEnvtest(t)
+	ns := "cel-test"
+	if err := cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatalf("ns: %v", err)
+	}
+	valid := func(name string) *misskeyv1alpha1.Misskey {
+		return &misskeyv1alpha1.Misskey{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec:       misskeyv1alpha1.MisskeySpec{URL: "https://cel.example.com/", Image: "misskey/misskey:x", Tenant: "t1"},
+		}
+	}
+
+	if err := cl.Create(ctx, valid("ok")); err != nil {
+		t.Fatalf("valid spec rejected: %v", err)
+	}
+
+	// immutable: update時にCELが拒否
+	immutable := []struct {
+		name   string
+		mutate func(*misskeyv1alpha1.Misskey)
+	}{
+		{"url", func(m *misskeyv1alpha1.Misskey) { m.Spec.URL = "https://other.example.com/" }},
+		{"idGenerationMethod", func(m *misskeyv1alpha1.Misskey) { m.Spec.IDGenerationMethod = "meid" }},
+		{"tenant", func(m *misskeyv1alpha1.Misskey) { m.Spec.Tenant = "t2" }},
+	}
+	for _, tc := range immutable {
+		cur := &misskeyv1alpha1.Misskey{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: "ok", Namespace: ns}, cur); err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		tc.mutate(cur)
+		if err := cl.Update(ctx, cur); !apierrors.IsInvalid(err) {
+			t.Errorf("%s change must be rejected by CEL, got %v", tc.name, err)
+		}
+	}
+
+	// cross-field: create時にCELが拒否
+	extPG := &misskeyv1alpha1.ExternalPostgres{Host: "pg", Database: "d", User: "u",
+		PasswordSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "s"}, Key: "p"}}
+	minR := int32(5)
+	cross := []struct {
+		name  string
+		build func(*misskeyv1alpha1.Misskey)
+	}{
+		{"pooler+external", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Postgres.External = extPG
+			m.Spec.Postgres.Pooler = &misskeyv1alpha1.PostgresPooler{}
+		}},
+		{"backup+external", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Postgres.External = extPG
+			m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{DestinationPath: "s3://b"}
+		}},
+		{"ha+external-redis", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Redis.External = &misskeyv1alpha1.ExternalRedis{Host: "r"}
+			m.Spec.Redis.HA = &misskeyv1alpha1.RedisHA{}
+		}},
+		{"autoscaling min>max", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Worker.Autoscaling = &misskeyv1alpha1.AutoscalingSpec{MinReplicas: &minR, MaxReplicas: 3}
+		}},
+		{"redis role external+ha", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Redis.Roles = &misskeyv1alpha1.RedisRoles{JobQueue: &misskeyv1alpha1.RedisRole{
+				External: &misskeyv1alpha1.ExternalRedis{Host: "r"}, HA: &misskeyv1alpha1.RedisHA{},
+			}}
+		}},
+	}
+	for i, tc := range cross {
+		m := valid(fmt.Sprintf("cross-%d", i))
+		tc.build(m)
+		if err := cl.Create(ctx, m); !apierrors.IsInvalid(err) {
+			t.Errorf("%s must be rejected by CEL, got %v", tc.name, err)
+		}
 	}
 }

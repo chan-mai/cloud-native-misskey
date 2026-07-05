@@ -744,11 +744,6 @@ func (in *RedisSpec) DeepCopyInto(out *RedisSpec) {
 		*out = new(bool)
 		**out = **in
 	}
-	if in.NetworkPolicy != nil {
-		in, out := &in.NetworkPolicy, &out.NetworkPolicy
-		*out = new(bool)
-		**out = **in
-	}
 	out.Storage = in.Storage.DeepCopy()
 	if in.StorageClassName != nil {
 		in, out := &in.StorageClassName, &out.StorageClassName

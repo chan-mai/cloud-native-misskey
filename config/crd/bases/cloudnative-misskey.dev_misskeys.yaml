@@ -118,6 +118,9 @@ spec:
                     required:
                     - maxReplicas
                     type: object
+                    x-kubernetes-validations:
+                    - message: minReplicas must not exceed maxReplicas
+                      rule: '!has(self.minReplicas) || self.minReplicas <= self.maxReplicas'
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -280,6 +283,9 @@ spec:
                 - ulid
                 - objectid
                 type: string
+                x-kubernetes-validations:
+                - message: idGenerationMethod is immutable
+                  rule: self == oldSelf
               image:
                 description: Image is the Misskey server container image. The app
                   and worker share it.
@@ -712,6 +718,11 @@ spec:
                     description: StorageClassName for the CNPG PVCs.
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: pooler requires managed PostgreSQL; remove postgres.external
+                  rule: '!(has(self.external) && has(self.pooler))'
+                - message: backup requires managed PostgreSQL; remove postgres.external
+                  rule: '!(has(self.external) && has(self.backup))'
               proxy:
                 description: Proxy configures the Caddy reverse proxy fronting the
                   app.
@@ -951,13 +962,6 @@ spec:
                       Redis also backs the job queue (BullMQ) and an eviction policy such as
                       allkeys-lru would silently drop queued/delayed jobs under memory pressure.
                     type: string
-                  networkPolicy:
-                    default: true
-                    description: |-
-                      NetworkPolicy toggles a NetworkPolicy that limits ingress to the managed
-                      Redis to app and worker pods. Default true. Only effective on CNIs that
-                      enforce NetworkPolicy.
-                    type: boolean
                   resources:
                     description: Resources for the managed Redis container.
                     properties:
@@ -1028,7 +1032,7 @@ spec:
                         description: |-
                           RedisRole separates one Misskey Redis role. Presence separates the role;
                           External points it at an existing Redis, otherwise a dedicated instance is
-                          provisioned (inheriting the default redis settings unless overridden here).
+                          provisioned with the managed-override fields.
                         properties:
                           external:
                             description: |-
@@ -1208,11 +1212,17 @@ spec:
                               managed PVC.
                             type: string
                         type: object
+                        x-kubernetes-validations:
+                        - message: external role cannot also set HA or managed overrides
+                            (maxMemory/storage/etc.)
+                          rule: '!has(self.external) || !(has(self.ha) || has(self.maxMemory)
+                            || has(self.maxMemoryPolicy) || has(self.storage) || has(self.storageClassName)
+                            || has(self.resources))'
                       pubsub:
                         description: |-
                           RedisRole separates one Misskey Redis role. Presence separates the role;
                           External points it at an existing Redis, otherwise a dedicated instance is
-                          provisioned (inheriting the default redis settings unless overridden here).
+                          provisioned with the managed-override fields.
                         properties:
                           external:
                             description: |-
@@ -1392,11 +1402,17 @@ spec:
                               managed PVC.
                             type: string
                         type: object
+                        x-kubernetes-validations:
+                        - message: external role cannot also set HA or managed overrides
+                            (maxMemory/storage/etc.)
+                          rule: '!has(self.external) || !(has(self.ha) || has(self.maxMemory)
+                            || has(self.maxMemoryPolicy) || has(self.storage) || has(self.storageClassName)
+                            || has(self.resources))'
                       reactions:
                         description: |-
                           RedisRole separates one Misskey Redis role. Presence separates the role;
                           External points it at an existing Redis, otherwise a dedicated instance is
-                          provisioned (inheriting the default redis settings unless overridden here).
+                          provisioned with the managed-override fields.
                         properties:
                           external:
                             description: |-
@@ -1576,11 +1592,17 @@ spec:
                               managed PVC.
                             type: string
                         type: object
+                        x-kubernetes-validations:
+                        - message: external role cannot also set HA or managed overrides
+                            (maxMemory/storage/etc.)
+                          rule: '!has(self.external) || !(has(self.ha) || has(self.maxMemory)
+                            || has(self.maxMemoryPolicy) || has(self.storage) || has(self.storageClassName)
+                            || has(self.resources))'
                       timelines:
                         description: |-
                           RedisRole separates one Misskey Redis role. Presence separates the role;
                           External points it at an existing Redis, otherwise a dedicated instance is
-                          provisioned (inheriting the default redis settings unless overridden here).
+                          provisioned with the managed-override fields.
                         properties:
                           external:
                             description: |-
@@ -1760,6 +1782,12 @@ spec:
                               managed PVC.
                             type: string
                         type: object
+                        x-kubernetes-validations:
+                        - message: external role cannot also set HA or managed overrides
+                            (maxMemory/storage/etc.)
+                          rule: '!has(self.external) || !(has(self.ha) || has(self.maxMemory)
+                            || has(self.maxMemoryPolicy) || has(self.storage) || has(self.storageClassName)
+                            || has(self.resources))'
                     type: object
                   storage:
                     anyOf:
@@ -1773,6 +1801,9 @@ spec:
                     description: StorageClassName for the managed Redis PVC.
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: HA requires managed Redis; remove redis.external
+                  rule: '!(has(self.external) && has(self.ha))'
               runtime:
                 description: |-
                   Runtime adapts the operator to Misskey forks whose image contract (uid,
@@ -2100,9 +2131,12 @@ spec:
               url:
                 description: |-
                   URL is the public-facing URL of the instance, e.g. https://misskey.example.com/.
-                  Do not change this after the instance has been initialized.
+                  Immutable after initialization (enforced by CEL, independent of the webhook).
                 pattern: ^https?://.+
                 type: string
+                x-kubernetes-validations:
+                - message: url is immutable
+                  rule: self == oldSelf
               worker:
                 description: Worker configures the job queue Deployment (runs with
                   MK_ONLY_QUEUE).
@@ -2167,6 +2201,9 @@ spec:
                     required:
                     - maxReplicas
                     type: object
+                    x-kubernetes-validations:
+                    - message: minReplicas must not exceed maxReplicas
+                      rule: '!has(self.minReplicas) || self.minReplicas <= self.maxReplicas'
                   nodeSelector:
                     additionalProperties:
                       type: string

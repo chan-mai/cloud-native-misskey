@@ -47,7 +47,6 @@ type redisManagedInstance struct {
 	storage         resource.Quantity
 	storageClass    *string
 	resources       corev1.ResourceRequirements
-	networkPolicy   bool
 
 	// HA用
 	replicas        int32
@@ -97,7 +96,6 @@ func buildManagedInstance(m *misskeyv1alpha1.Misskey, suffix string, role *missk
 		storage:         quantityOr(rs.Storage, "2Gi"),
 		storageClass:    rs.StorageClassName,
 		resources:       rs.Resources,
-		networkPolicy:   boolOr(rs.NetworkPolicy, true),
 	}
 	if role != nil {
 		inst.maxMemory = stringOr(role.MaxMemory, inst.maxMemory)
@@ -184,11 +182,12 @@ func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alph
 
 // reconcileRedisHANetworkPolicy: operator管理HA redis/sentinel podへのingressを制限
 // app/worker + intra-HA + allowedNamespaces(redis-operator/keda)のみ許可
-// requirepassと併せた多層防御。spec.redis.networkPolicy=falseで無効化
+// HA podはinstance labelを持たずnetworkIsolationのNPに乗らないため、その穴を埋める専用NP
+// networkIsolation.enabledでgate(networkIsolationの一部として機能)。requirepassと併せた多層防御
 func (r *MisskeyReconciler) reconcileRedisHANetworkPolicy(ctx context.Context, m *misskeyv1alpha1.Misskey, inst redisManagedInstance) error {
 	name := nameRedisInstance(m, inst.suffix) + "-ha"
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.Namespace}}
-	if !inst.networkPolicy {
+	if !boolOr(m.Spec.NetworkIsolation.Enabled, true) {
 		return r.deleteIfExists(ctx, np)
 	}
 	rp := intstr.FromInt32(redisPort)
@@ -295,32 +294,10 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 	}); err != nil {
 		return err
 	}
-	return r.reconcileRedisStandaloneNetworkPolicy(ctx, m, inst)
-}
-
-// reconcileRedisStandaloneNetworkPolicy: standalone Redisへのingressをapp/workerに限る
-// CNIが強制する場合のみ有効, spec.redis.networkPolicy=falseで無効化
-func (r *MisskeyReconciler) reconcileRedisStandaloneNetworkPolicy(ctx context.Context, m *misskeyv1alpha1.Misskey, inst redisManagedInstance) error {
-	name := nameRedisInstance(m, inst.suffix)
-	comp := redisComponent(inst.suffix)
-	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.Namespace}}
-	if !inst.networkPolicy {
-		return r.deleteIfExists(ctx, np)
-	}
-	port := intstr.FromInt32(redisPort)
-	return r.apply(ctx, m, np, func() error {
-		np.Labels = labelsFor(m, comp)
-		np.Spec.PodSelector = metav1.LabelSelector{MatchLabels: selectorFor(m, comp)}
-		np.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
-		np.Spec.Ingress = []networkingv1.NetworkPolicyIngressRule{{
-			From: []networkingv1.NetworkPolicyPeer{
-				{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleApp)}},
-				{PodSelector: &metav1.LabelSelector{MatchLabels: selectorFor(m, roleWorker)}},
-			},
-			Ports: []networkingv1.NetworkPolicyPort{{Port: &port}},
-		}}
-		return nil
-	})
+	// standalone redisはinstance全体のnetworkIsolation(intra-instance)で保護する
+	// 旧版が作っていた専用NP(<name>-redis)があれば掃除
+	oldNP := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: nameRedisInstance(m, inst.suffix), Namespace: m.Namespace}}
+	return r.deleteIfExists(ctx, oldNP)
 }
 
 // deleteRedisStandalone: 指定suffixのstandalone資源(STS/Service/NetworkPolicy)を掃除
