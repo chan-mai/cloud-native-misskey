@@ -71,3 +71,17 @@ jobs:
 
       - name: docker build
         run: docker build -t ci-check .
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: kind e2e
+        run: make test-e2e

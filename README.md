@@ -293,6 +293,7 @@ make generate    # DeepCopy再生成
 make build       # bin/manager
 make run         # kubeconfigのクラスタに対してローカル実行
 make fmt vet
+make test-e2e    # kind e2e
 ```
 
 ## 制限事項/TODO

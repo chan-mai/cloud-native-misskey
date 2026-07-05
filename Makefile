@@ -43,6 +43,10 @@ vet: ## Run go vet.
 test: manifests generate fmt vet ## Run tests.
 	go test ./... -coverprofile cover.out
 
+.PHONY: test-e2e
+test-e2e: kind kustomize ## Run kind e2e tests (requires docker).
+	hack/e2e.sh
+
 ##@ Build
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
@@ -85,9 +89,11 @@ $(LOCALBIN):
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
+KIND ?= $(LOCALBIN)/kind
 
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
 KUSTOMIZE_VERSION ?= v5.8.1
+KIND_VERSION ?= v0.32.0
 
 .PHONY: controller-gen
 controller-gen: $(LOCALBIN) ## Download controller-gen locally if necessary.
@@ -96,3 +102,7 @@ controller-gen: $(LOCALBIN) ## Download controller-gen locally if necessary.
 .PHONY: kustomize
 kustomize: $(LOCALBIN) ## Download kustomize locally if necessary.
 	@test -s $(KUSTOMIZE) || GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@$(KUSTOMIZE_VERSION)
+
+.PHONY: kind
+kind: $(LOCALBIN) ## Download kind locally if necessary.
+	@test -s $(KIND) || GOBIN=$(LOCALBIN) go install sigs.k8s.io/kind@$(KIND_VERSION)
