@@ -86,8 +86,8 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 
-CONTROLLER_TOOLS_VERSION ?= v0.16.5
-KUSTOMIZE_VERSION ?= v5.4.3
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
+KUSTOMIZE_VERSION ?= v5.8.1
 
 .PHONY: controller-gen
 controller-gen: $(LOCALBIN) ## Download controller-gen locally if necessary.

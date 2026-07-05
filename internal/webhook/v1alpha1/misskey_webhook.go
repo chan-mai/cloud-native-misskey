@@ -19,11 +19,8 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloud-native-misskey/api/v1alpha1"
@@ -37,7 +34,7 @@ import (
 // 表せない項目だけを担当します: tenant未設定→namespaceのdefault(「未設定→初回設定」の
 // 穴を塞ぐ)と、エラーにするほどでない補助的な警告です。
 func SetupMisskeyWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&misskeyv1alpha1.Misskey{}).
+	return ctrl.NewWebhookManagedBy(mgr, &misskeyv1alpha1.Misskey{}).
 		WithDefaulter(&MisskeyCustomDefaulter{}).
 		WithValidator(&MisskeyCustomValidator{}).
 		Complete()
@@ -48,14 +45,10 @@ func SetupMisskeyWebhookWithManager(mgr ctrl.Manager) error {
 // MisskeyCustomDefaulter: CRD既定で表せない項目を補完
 type MisskeyCustomDefaulter struct{}
 
-var _ webhook.CustomDefaulter = &MisskeyCustomDefaulter{}
+var _ admission.Defaulter[*misskeyv1alpha1.Misskey] = &MisskeyCustomDefaulter{}
 
 // Default: tenant未設定はnamespaceで確定。以後CELでimmutableとなり「未設定→初回設定」の穴を塞ぐ
-func (d *MisskeyCustomDefaulter) Default(_ context.Context, obj runtime.Object) error {
-	m, ok := obj.(*misskeyv1alpha1.Misskey)
-	if !ok {
-		return fmt.Errorf("expected Misskey, got %T", obj)
-	}
+func (d *MisskeyCustomDefaulter) Default(_ context.Context, m *misskeyv1alpha1.Misskey) error {
 	if m.Spec.Tenant == "" {
 		m.Spec.Tenant = m.Namespace
 	}
@@ -67,25 +60,17 @@ func (d *MisskeyCustomDefaulter) Default(_ context.Context, obj runtime.Object) 
 // MisskeyCustomValidator: CELで表せない補助的な警告のみ(エラーはCELが常時強制)
 type MisskeyCustomValidator struct{}
 
-var _ webhook.CustomValidator = &MisskeyCustomValidator{}
+var _ admission.Validator[*misskeyv1alpha1.Misskey] = &MisskeyCustomValidator{}
 
-func (v *MisskeyCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	m, ok := obj.(*misskeyv1alpha1.Misskey)
-	if !ok {
-		return nil, fmt.Errorf("expected Misskey, got %T", obj)
-	}
+func (v *MisskeyCustomValidator) ValidateCreate(_ context.Context, m *misskeyv1alpha1.Misskey) (admission.Warnings, error) {
 	return advisoryWarnings(m), nil
 }
 
-func (v *MisskeyCustomValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	m, ok := newObj.(*misskeyv1alpha1.Misskey)
-	if !ok {
-		return nil, fmt.Errorf("expected Misskey, got %T", newObj)
-	}
-	return advisoryWarnings(m), nil
+func (v *MisskeyCustomValidator) ValidateUpdate(_ context.Context, _, newObj *misskeyv1alpha1.Misskey) (admission.Warnings, error) {
+	return advisoryWarnings(newObj), nil
 }
 
-func (v *MisskeyCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *MisskeyCustomValidator) ValidateDelete(_ context.Context, _ *misskeyv1alpha1.Misskey) (admission.Warnings, error) {
 	return nil, nil
 }
 
