@@ -206,12 +206,13 @@ func redisEgressRule(m *misskeyv1alpha1.Misskey) *networkingv1.NetworkPolicyEgre
 	}
 }
 
-// publicEgressRule: private/link-local(metadata)を除くpublicへのegress
+// publicEgressRule: private/CGNAT/link-local(metadata)を除くpublicへのegress
+// IPv4のみ対応。dual-stackクラスタのIPv6 egressは本ruleに乗らず遮断される(fail-closed、README制限事項参照)
 func publicEgressRule() networkingv1.NetworkPolicyEgressRule {
 	return networkingv1.NetworkPolicyEgressRule{
 		To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{
 			CIDR:   "0.0.0.0/0",
-			Except: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"},
+			Except: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"},
 		}}},
 	}
 }

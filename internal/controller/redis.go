@@ -34,6 +34,15 @@ import (
 // 公式redisイメージが動作するuid(standalone)
 const redisUID = 999
 
+// redisPingProbe: standalone redisのping probe(認証なし前提)
+func redisPingProbe(period int32) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler:   corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"redis-cli", "ping"}}},
+		PeriodSeconds:  period,
+		TimeoutSeconds: 3,
+	}
+}
+
 // redisManagedInstance: 1つのmanaged redisインスタンスのprovisioning設定
 type redisManagedInstance struct {
 	suffix string // ""=default、role時は"jobqueue"等
@@ -267,6 +276,8 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 				SecurityContext: restrictedContainerSecurityContext(),
 				Resources:       resourcesOr(inst.resources, "50m", "128Mi", "512Mi"),
 				Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
+				ReadinessProbe:  redisPingProbe(10),
+				LivenessProbe:   redisPingProbe(20),
 				VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
 			},
 		}
