@@ -23,6 +23,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,6 +197,21 @@ func TestE2E(t *testing.T) {
 	}
 	if cur.Status.DatabaseHost != name+"-db-rw" {
 		t.Errorf("databaseHost=%q, want %s-db-rw", cur.Status.DatabaseHost, name)
+	}
+
+	// managed redisがrequirepass認証で構成され、app/workerが認証接続してReadyに到達したことを実クラスタで確認
+	// (Ready到達自体がpassword一致のend-to-end証明。加えてsecret/STS commandを明示検証)
+	authSec := &corev1.Secret{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name + "-redis-auth", Namespace: ns}, authSec); err != nil {
+		t.Errorf("redis auth secret未生成: %v", err)
+	} else if len(authSec.Data["password"]) == 0 {
+		t.Error("redis auth secretにpasswordが無い")
+	}
+	redisSTS := &appsv1.StatefulSet{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name + "-redis", Namespace: ns}, redisSTS); err != nil {
+		t.Errorf("redis STS取得: %v", err)
+	} else if cmd := redisSTS.Spec.Template.Spec.Containers[0].Command; len(cmd) != 3 || !strings.Contains(cmd[2], "--requirepass") {
+		t.Errorf("redis STS requirepass無し: %+v", cmd)
 	}
 
 	// 削除→finalizer→子リソースGC
