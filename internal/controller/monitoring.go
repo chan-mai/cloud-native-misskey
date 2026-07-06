@@ -186,12 +186,15 @@ func monitorObjRef(m *misskeyv1alpha1.Misskey, gvk schema.GroupVersionKind, name
 	return u
 }
 
-// redisExporterContainer: standalone Redis用のredis_exporter sidecar(認証なし)
+// redisExporterContainer: standalone Redis用のredis_exporter sidecar(REDIS_PASSWORDでrequirepass認証)
 func redisExporterContainer(m *misskeyv1alpha1.Misskey) corev1.Container {
 	return corev1.Container{
-		Name:            "metrics",
-		Image:           stringOr(m.Spec.Monitoring.RedisExporterImage, "oliver006/redis_exporter:v1.62.0-alpine"),
-		Env:             []corev1.EnvVar{{Name: "REDIS_ADDR", Value: fmt.Sprintf("redis://localhost:%d", redisPort)}},
+		Name:  "metrics",
+		Image: stringOr(m.Spec.Monitoring.RedisExporterImage, "oliver006/redis_exporter:v1.62.0-alpine"),
+		Env: []corev1.EnvVar{
+			{Name: "REDIS_ADDR", Value: fmt.Sprintf("redis://localhost:%d", redisPort)},
+			secretEnv("REDIS_PASSWORD", redisAuthSecretKeySelector(m)),
+		},
 		Ports:           []corev1.ContainerPort{{Name: "metrics", ContainerPort: redisExporterPort}},
 		SecurityContext: restrictedContainerSecurityContext(),
 		Resources:       resourcesOr(corev1.ResourceRequirements{}, "10m", "16Mi", "64Mi"),

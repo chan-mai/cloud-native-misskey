@@ -48,7 +48,7 @@ func autoscalingUsesKEDA(a *misskeyv1alpha1.AutoscalingSpec) bool {
 	return len(a.Queues) > 0
 }
 
-// nameTriggerAuth: KEDA TriggerAuthentication名(external redis認証用)
+// nameTriggerAuth: KEDA TriggerAuthentication名(redis認証用, managed/external問わず)
 func nameTriggerAuth(targetName string) string { return targetName + "-redis-auth" }
 
 // reconcileAutoscaler: componentのHPA/ScaledObjectを望ましい状態へ収束、無効/mode切替で他方を掃除
@@ -114,7 +114,7 @@ func resourceUtilMetric(name corev1.ResourceName, target int32) autoscalingv2.Me
 	}
 }
 
-// reconcileScaledObject: KEDA ScaledObject(+external redis認証時TriggerAuthentication)をapply
+// reconcileScaledObject: KEDA ScaledObject(+redis認証時TriggerAuthentication)をapply
 func (r *MisskeyReconciler) reconcileScaledObject(ctx context.Context, m *misskeyv1alpha1.Misskey, component, targetName string, a *misskeyv1alpha1.AutoscalingSpec, p plan) error {
 	ep := jobQueueEndpoint(p)
 	if ep.passSel != nil {
@@ -227,7 +227,7 @@ func sentinelHostsPorts(ep redisEndpoint, namespace string) (string, string) {
 	return strings.Join(hosts, ","), strings.Join(ports, ",")
 }
 
-// buildTriggerAuth: external redisパスワードをKEDAへ渡すTriggerAuthentication
+// buildTriggerAuth: redisパスワードをKEDAへ渡すTriggerAuthentication(managed/external問わず)
 func buildTriggerAuth(m *misskeyv1alpha1.Misskey, targetName string, ep redisEndpoint) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(triggerAuthGVK)

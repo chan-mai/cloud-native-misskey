@@ -35,7 +35,12 @@ func redisAuthSecretRef(m *misskeyv1alpha1.Misskey) map[string]any {
 	return map[string]any{"name": nameRedisAuthSecret(m), "key": "password"}
 }
 
-// reconcileRedisAuthSecret: HA redisのrequirepass用にrandom passwordのSecretを保証(冪等・生成後は不変)
+// redisAuthSecretKeySelector: requirepass secretのSecretKeySelector(env注入・config置換用)
+func redisAuthSecretKeySelector(m *misskeyv1alpha1.Misskey) corev1.SecretKeySelector {
+	return corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: nameRedisAuthSecret(m)}, Key: "password"}
+}
+
+// reconcileRedisAuthSecret: managed redisのrequirepass用にrandom passwordのSecretを保証(冪等・生成後は不変)
 func (r *MisskeyReconciler) reconcileRedisAuthSecret(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameRedisAuthSecret(m), Namespace: m.Namespace}}
 	return r.apply(ctx, m, secret, func() error {

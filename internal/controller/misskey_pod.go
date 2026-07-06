@@ -44,7 +44,7 @@ func renderInitEnv(p plan) []corev1.EnvVar {
 	if p.meiliEnabled {
 		env = append(env, secretEnv("MEILI_KEY", p.meiliKeySel))
 	}
-	// default + 各role redisのpassword(external認証時のみ)。managedは認証なし
+	// default + 各role redisのpassword。managed(requirepass)/external問わずpassSelがあれば注入
 	if p.redisDefault.passSel != nil {
 		env = append(env, secretEnv(p.redisDefault.passEnv, *p.redisDefault.passSel))
 	}

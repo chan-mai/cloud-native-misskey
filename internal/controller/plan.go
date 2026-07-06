@@ -312,8 +312,9 @@ func externalRedisEndpoint(ext *misskeyv1alpha1.ExternalRedis, passEnv string) r
 }
 
 // managedRedisEndpoint: operator管理redisのendpoint。HA有効でSentinelモード(sentinels+masterName)
-// HAはrequirepass認証あり(passSel=<name>-redis-auth)。standaloneは認証なし(NP保護)
+// standalone/HAともrequirepass認証あり(passSel=<name>-redis-auth)。NP+認証の多層防御
 func managedRedisEndpoint(m *misskeyv1alpha1.Misskey, suffix, passEnv string, ha *misskeyv1alpha1.RedisHA) redisEndpoint {
+	authSel := redisAuthSecretKeySelector(m)
 	if ha != nil {
 		return redisEndpoint{
 			// host/portはioredisのsentinelモードでは無視されるがMisskeyのschema上必須
@@ -321,13 +322,13 @@ func managedRedisEndpoint(m *misskeyv1alpha1.Misskey, suffix, passEnv string, ha
 			port:       redisPort,
 			sentinels:  []redisHostPort{{host: nameRedisSentinelService(m, suffix), port: sentinelPort}},
 			masterName: redisMasterGroup,
-			passSel:    &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: nameRedisAuthSecret(m)}, Key: "password"},
+			passSel:    &authSel,
 			passEnv:    passEnv,
 			managed:    true,
 			ha:         true,
 		}
 	}
-	return redisEndpoint{host: nameRedisInstance(m, suffix), port: redisPort, managed: true}
+	return redisEndpoint{host: nameRedisInstance(m, suffix), port: redisPort, passSel: &authSel, passEnv: passEnv, managed: true}
 }
 
 // vがゼロならdef、そうでなければvを返す

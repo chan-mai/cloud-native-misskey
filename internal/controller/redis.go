@@ -34,7 +34,7 @@ import (
 // 公式redisイメージが動作するuid(standalone)
 const redisUID = 999
 
-// redisPingProbe: standalone redisのping probe(認証なし前提)
+// redisPingProbe: standalone redisのping probe。redis-cliはREDISCLI_AUTH envで自動AUTH
 func redisPingProbe(period int32) *corev1.Probe {
 	return &corev1.Probe{
 		ProbeHandler:   corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"redis-cli", "ping"}}},
@@ -133,13 +133,10 @@ func buildManagedInstance(m *misskeyv1alpha1.Misskey, suffix string, role *missk
 // 望ましくなくなった(external化/role削除/mode切替)インスタンスを掃除
 func (r *MisskeyReconciler) reconcileRedis(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	desired := managedRedisInstances(m)
-	// HAが1つでもあればrequirepass用のauth secretを用意(CR/pod参照前に存在させる)
-	for _, inst := range desired {
-		if inst.ha {
-			if err := r.reconcileRedisAuthSecret(ctx, m); err != nil {
-				return err
-			}
-			break
+	// managedが1つでもあればrequirepass用のauth secretを用意(standalone/HA共通, CR/pod参照前に存在させる)
+	if len(desired) > 0 {
+		if err := r.reconcileRedisAuthSecret(ctx, m); err != nil {
+			return err
 		}
 	}
 	seenStandalone := map[string]bool{}
@@ -255,10 +252,20 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 		return err
 	}
 
+	// requirepass認証: passwordはenv経由でpod specに平文露出させない
+	// maxmemory等もenvで渡しdouble-quote参照, sh経由でも値のワード分割/コマンド注入を防ぐ
 	// キュー耐久化のためAOFを既定有効
-	args := []string{"redis-server", "--maxmemory", inst.maxMemory, "--maxmemory-policy", inst.maxMemoryPolicy}
+	redisCmd := `exec redis-server --requirepass "$REDIS_PASSWORD" --maxmemory "$MAXMEMORY" --maxmemory-policy "$MAXMEMORY_POLICY"`
 	if inst.appendOnly {
-		args = append(args, "--appendonly", "yes")
+		redisCmd += " --appendonly yes"
+	}
+	authSel := redisAuthSecretKeySelector(m)
+	redisEnv := []corev1.EnvVar{
+		// server用requirepassとredis-cli(probe)用のAUTHを同一secretから
+		secretEnv("REDIS_PASSWORD", authSel),
+		secretEnv("REDISCLI_AUTH", authSel),
+		{Name: "MAXMEMORY", Value: inst.maxMemory},
+		{Name: "MAXMEMORY_POLICY", Value: inst.maxMemoryPolicy},
 	}
 
 	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: m.Namespace}}
@@ -272,7 +279,8 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 			{
 				Name:            "redis",
 				Image:           inst.image,
-				Args:            args,
+				Command:         []string{"sh", "-c", redisCmd},
+				Env:             redisEnv,
 				SecurityContext: restrictedContainerSecurityContext(),
 				Resources:       resourcesOr(inst.resources, "50m", "128Mi", "512Mi"),
 				Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
@@ -281,7 +289,7 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 				VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
 			},
 		}
-		// monitoring時はredis_exporter sidecar(standaloneは認証なし)
+		// monitoring時はredis_exporter sidecar(requirepassをREDIS_PASSWORDで認証)
 		if monitoringEnabled(m) {
 			containers = append(containers, redisExporterContainer(m))
 		}

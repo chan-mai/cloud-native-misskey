@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -468,6 +469,73 @@ func TestSecretRotationRollsPods(t *testing.T) {
 	}
 	if dep.Spec.Template.Annotations[configChecksumAnnotation] == before {
 		t.Error("Secretローテーションでchecksumが変わらない")
+	}
+}
+
+// TestRedisStandaloneAuth: managed standalone redisがrequirepass認証で構成されること
+func TestRedisStandaloneAuth(t *testing.T) {
+	ctx, cl, sch := setupEnvtest(t)
+	ns := "redisauth"
+	if err := cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatalf("ns: %v", err)
+	}
+	m := &misskeyv1alpha1.Misskey{
+		ObjectMeta: metav1.ObjectMeta{Name: "ra", Namespace: ns},
+		Spec: misskeyv1alpha1.MisskeySpec{
+			URL:    "https://ra.example.com/",
+			Image:  "misskey/misskey:x",
+			Search: misskeyv1alpha1.SearchSpec{Provider: misskeyv1alpha1.SearchSQLLike},
+			Postgres: misskeyv1alpha1.PostgresSpec{External: &misskeyv1alpha1.ExternalPostgres{
+				Host: "pg", Database: "d", User: "u",
+				PasswordSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pgsec"}, Key: "pw"},
+			}},
+			// Redis未指定 → managed standalone
+		},
+	}
+	if err := cl.Create(ctx, m); err != nil {
+		t.Fatalf("create misskey: %v", err)
+	}
+	r := &MisskeyReconciler{Client: cl, Scheme: sch}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ra", Namespace: ns}}
+	for i := 0; i < 2; i++ {
+		if _, err := r.Reconcile(ctx, req); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+	}
+
+	// auth secret生成(passwordあり)
+	authSec := &corev1.Secret{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: nameRedisAuthSecret(m), Namespace: ns}, authSec); err != nil {
+		t.Fatalf("redis auth secret未生成: %v", err)
+	}
+	if len(authSec.Data["password"]) == 0 {
+		t.Error("redis auth secretにpasswordが無い")
+	}
+
+	// redis STS: sh -c requirepass + REDIS_PASSWORD/REDISCLI_AUTH env
+	sts := &appsv1.StatefulSet{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: nameRedis(m), Namespace: ns}, sts); err != nil {
+		t.Fatalf("redis STS未生成: %v", err)
+	}
+	c := sts.Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 3 || c.Command[0] != "sh" || !strings.Contains(c.Command[2], `--requirepass "$REDIS_PASSWORD"`) {
+		t.Errorf("redis command requirepass無し: %+v", c.Command)
+	}
+	envNames := map[string]bool{}
+	for _, e := range c.Env {
+		envNames[e.Name] = true
+	}
+	if !envNames["REDIS_PASSWORD"] || !envNames["REDISCLI_AUTH"] {
+		t.Errorf("redis env不足: %+v", c.Env)
+	}
+
+	// config: redisブロックにpass: ${REDIS_PASSWORD}
+	cm := &corev1.ConfigMap{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: nameConfig(m), Namespace: ns}, cm); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cm.Data["default.yml"], "pass: ${REDIS_PASSWORD}") {
+		t.Errorf("default.ymlにredis pass無し:\n%s", cm.Data["default.yml"])
 	}
 }
 

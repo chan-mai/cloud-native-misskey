@@ -762,9 +762,10 @@ func TestRedisHAAuth(t *testing.T) {
 	if ep.passEnv != "REDIS_PASSWORD" {
 		t.Errorf("default HA passEnv: %q", ep.passEnv)
 	}
-	// standalone managed: 認証なし(NP保護)
-	if resolve(newMisskey()).redisDefault.passSel != nil {
-		t.Error("standalone managed redis must not have auth")
+	// standalone managed: requirepass認証あり(NP+認証の多層防御)
+	sa := resolve(newMisskey()).redisDefault
+	if sa.passSel == nil || sa.passSel.Name != "example-redis-auth" || sa.passEnv != "REDIS_PASSWORD" {
+		t.Errorf("standalone managed redis must carry requirepass: sel=%+v env=%q", sa.passSel, sa.passEnv)
 	}
 	// role HA: role別passEnv
 	m2 := newMisskey()
