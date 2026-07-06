@@ -418,6 +418,208 @@ spec:
                         type: boolean
                     type: object
                 type: object
+              objectStorage:
+                description: |-
+                  ObjectStorage configures S3/R2-compatible media storage. Misskey stores this
+                  in the DB meta table (not default.yml), so the operator writes it via a
+                  one-shot Job after migration. Opt-in. Existing uploads are not migrated.
+                properties:
+                  autoConfigure:
+                    default: true
+                    description: |-
+                      AutoConfigure lets the operator write the settings into the meta table via
+                      a Job. Default true. Set false to declare the settings without the operator
+                      touching the database (apply them yourself).
+                    type: boolean
+                  baseUrl:
+                    description: |-
+                      BaseURL is the public base URL used to build file URLs, e.g. a bucket
+                      public domain. Required for R2 (its S3 API endpoint is not public).
+                    pattern: ^https?://.+
+                    type: string
+                  bucket:
+                    description: Bucket is the S3 bucket name.
+                    minLength: 1
+                    type: string
+                  columnNames:
+                    description: |-
+                      ColumnNames overrides the meta table column names, for Misskey forks or
+                      older versions whose columns differ from upstream.
+                    properties:
+                      accessKey:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      baseUrl:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      bucket:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      endpoint:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      port:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      prefix:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      region:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      s3ForcePathStyle:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      secretKey:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      setPublicRead:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      useObjectStorage:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      useProxy:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      useSSL:
+                        maxLength: 63
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                    type: object
+                  credentials:
+                    description: Credentials references the S3 access key id and secret
+                      access key.
+                    properties:
+                      accessKeyId:
+                        description: AccessKeyID references the access key id.
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      secretAccessKey:
+                        description: SecretAccessKey references the secret access
+                          key.
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - accessKeyId
+                    - secretAccessKey
+                    type: object
+                  endpoint:
+                    description: |-
+                      Endpoint is the S3 API endpoint host without a scheme, e.g.
+                      s3.example.com or <accountid>.r2.cloudflarestorage.com. The scheme is
+                      derived from useSSL.
+                    pattern: ^[^/]*$
+                    type: string
+                  extraColumns:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      ExtraColumns writes additional meta columns (fork-specific) as plaintext
+                      values keyed by column name. Secrets belong in credentials, not here.
+                    type: object
+                  image:
+                    default: ghcr.io/cloudnative-pg/postgresql:17
+                    description: |-
+                      Image is the psql-capable image for the meta-write Job. Defaults to the
+                      CNPG PostgreSQL image, which ships psql 16+ (required for \getenv).
+                    type: string
+                  port:
+                    description: Port overrides the endpoint port. Omit for the scheme
+                      default.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  prefix:
+                    description: Prefix is an optional key prefix for stored objects.
+                    type: string
+                  region:
+                    default: us-east-1
+                    description: |-
+                      Region is the S3 region. Defaults to us-east-1 for stores with no region
+                      concept (e.g. MinIO); Cloudflare R2 uses "auto".
+                    type: string
+                  s3ForcePathStyle:
+                    default: true
+                    description: S3ForcePathStyle uses path-style requests against
+                      the endpoint. Default true.
+                    type: boolean
+                  setPublicRead:
+                    default: false
+                    description: |-
+                      SetPublicRead sets a public-read ACL on upload. Default false. Must stay
+                      false for Cloudflare R2, which does not support object ACLs.
+                    type: boolean
+                  useProxy:
+                    default: true
+                    description: UseProxy routes S3 traffic through Misskey's configured
+                      HTTP proxy. Default true.
+                    type: boolean
+                  useSSL:
+                    default: true
+                    description: UseSSL talks to the endpoint over https. Default
+                      true.
+                    type: boolean
+                required:
+                - bucket
+                - credentials
+                type: object
+                x-kubernetes-validations:
+                - message: extraColumns keys must be valid SQL identifiers
+                  rule: '!has(self.extraColumns) || self.extraColumns.all(k, k.matches(''^[A-Za-z_][A-Za-z0-9_]*$''))'
               postgres:
                 description: Postgres configures the PostgreSQL backend (CNPG-managed
                   or external).

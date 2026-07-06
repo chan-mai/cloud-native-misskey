@@ -121,6 +121,12 @@ type MisskeySpec struct {
 	// +optional
 	ExtraConfig string `json:"extraConfig,omitempty"`
 
+	// ObjectStorage configures S3/R2-compatible media storage. Misskey stores this
+	// in the DB meta table (not default.yml), so the operator writes it via a
+	// one-shot Job after migration. Opt-in. Existing uploads are not migrated.
+	// +optional
+	ObjectStorage *ObjectStorageSpec `json:"objectStorage,omitempty"`
+
 	// Network groups this instance's NetworkPolicy controls (ingress isolation and
 	// opt-in egress isolation).
 	// +optional
@@ -875,6 +881,154 @@ type S3Credentials struct {
 	AccessKeyID corev1.SecretKeySelector `json:"accessKeyId"`
 	// SecretAccessKey references the secret access key.
 	SecretAccessKey corev1.SecretKeySelector `json:"secretAccessKey"`
+}
+
+// ObjectStorageSpec configures S3/R2-compatible media storage. The operator
+// writes these into Misskey's meta table via a one-shot Job (autoConfigure),
+// since Misskey does not read object storage settings from default.yml. Generic
+// S3; for Cloudflare R2 see the README example (endpoint without scheme,
+// region auto, baseUrl a public domain, setPublicRead false).
+// +kubebuilder:validation:XValidation:rule="!has(self.extraColumns) || self.extraColumns.all(k, k.matches('^[A-Za-z_][A-Za-z0-9_]*$'))",message="extraColumns keys must be valid SQL identifiers"
+type ObjectStorageSpec struct {
+	// Bucket is the S3 bucket name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Bucket string `json:"bucket"`
+
+	// Endpoint is the S3 API endpoint host without a scheme, e.g.
+	// s3.example.com or <accountid>.r2.cloudflarestorage.com. The scheme is
+	// derived from useSSL.
+	// +kubebuilder:validation:Pattern=`^[^/]*$`
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// Region is the S3 region. Defaults to us-east-1 for stores with no region
+	// concept (e.g. MinIO); Cloudflare R2 uses "auto".
+	// +kubebuilder:default="us-east-1"
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// Prefix is an optional key prefix for stored objects.
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+
+	// BaseURL is the public base URL used to build file URLs, e.g. a bucket
+	// public domain. Required for R2 (its S3 API endpoint is not public).
+	// +kubebuilder:validation:Pattern=`^https?://.+`
+	// +optional
+	BaseURL string `json:"baseUrl,omitempty"`
+
+	// Port overrides the endpoint port. Omit for the scheme default.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port *int32 `json:"port,omitempty"`
+
+	// UseSSL talks to the endpoint over https. Default true.
+	// +kubebuilder:default=true
+	// +optional
+	UseSSL *bool `json:"useSSL,omitempty"`
+
+	// UseProxy routes S3 traffic through Misskey's configured HTTP proxy. Default true.
+	// +kubebuilder:default=true
+	// +optional
+	UseProxy *bool `json:"useProxy,omitempty"`
+
+	// SetPublicRead sets a public-read ACL on upload. Default false. Must stay
+	// false for Cloudflare R2, which does not support object ACLs.
+	// +kubebuilder:default=false
+	// +optional
+	SetPublicRead *bool `json:"setPublicRead,omitempty"`
+
+	// S3ForcePathStyle uses path-style requests against the endpoint. Default true.
+	// +kubebuilder:default=true
+	// +optional
+	S3ForcePathStyle *bool `json:"s3ForcePathStyle,omitempty"`
+
+	// Credentials references the S3 access key id and secret access key.
+	// +kubebuilder:validation:Required
+	Credentials S3Credentials `json:"credentials"`
+
+	// AutoConfigure lets the operator write the settings into the meta table via
+	// a Job. Default true. Set false to declare the settings without the operator
+	// touching the database (apply them yourself).
+	// +kubebuilder:default=true
+	// +optional
+	AutoConfigure *bool `json:"autoConfigure,omitempty"`
+
+	// ColumnNames overrides the meta table column names, for Misskey forks or
+	// older versions whose columns differ from upstream.
+	// +optional
+	ColumnNames *ObjectStorageColumns `json:"columnNames,omitempty"`
+
+	// ExtraColumns writes additional meta columns (fork-specific) as plaintext
+	// values keyed by column name. Secrets belong in credentials, not here.
+	// +optional
+	ExtraColumns map[string]string `json:"extraColumns,omitempty"`
+
+	// Image is the psql-capable image for the meta-write Job. Defaults to the
+	// CNPG PostgreSQL image, which ships psql 16+ (required for \getenv).
+	// +kubebuilder:default="ghcr.io/cloudnative-pg/postgresql:17"
+	// +optional
+	Image string `json:"image,omitempty"`
+}
+
+// ObjectStorageColumns overrides the meta table column identifiers. Each field
+// defaults to the upstream Misskey column name; set one only when a fork or an
+// older version renamed it. Values are SQL identifiers.
+type ObjectStorageColumns struct {
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	UseObjectStorage string `json:"useObjectStorage,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	BaseURL string `json:"baseUrl,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Bucket string `json:"bucket,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Region string `json:"region,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Port string `json:"port,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	AccessKey string `json:"accessKey,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	SecretKey string `json:"secretKey,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	UseSSL string `json:"useSSL,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	UseProxy string `json:"useProxy,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	SetPublicRead string `json:"setPublicRead,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	S3ForcePathStyle string `json:"s3ForcePathStyle,omitempty"`
 }
 
 // MisskeyStatus defines the observed state of a Misskey instance.
