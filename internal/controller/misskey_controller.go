@@ -280,6 +280,12 @@ func (r *MisskeyReconciler) databaseReady(ctx context.Context, m *misskeyv1alpha
 	return st == metav1.ConditionTrue
 }
 
+// redisReady: gate用, redisConditionがTrueか
+func (r *MisskeyReconciler) redisReady(ctx context.Context, m *misskeyv1alpha1.Misskey) bool {
+	st, _, _ := r.redisCondition(ctx, m)
+	return st == metav1.ConditionTrue
+}
+
 // 全子リソースを依存順に生成
 func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	p := resolve(m)
@@ -343,7 +349,8 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 					return err
 				}
 			}
-			if objReady {
+			// redis ready後にのみapp/workerをroll, sentinel準備前のroll回避(pub/sub購読失敗防止)
+			if objReady && r.redisReady(ctx, m) {
 				if err := r.reconcileApp(ctx, m, p); err != nil {
 					return err
 				}

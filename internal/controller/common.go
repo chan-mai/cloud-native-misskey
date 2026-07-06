@@ -136,7 +136,7 @@ func nameRedisInstance(m *misskeyv1alpha1.Misskey, suffix string) string {
 	return nameRedis(m) + "-" + suffix
 }
 
-// HA replication/sentinelのCR名。standalone STS(<name>-redis)とOT作成STSの名前衝突を避け-ha基底
+// HA replication/sentinelのCR名, standalone STS(<name>-redis)とOT作成STS名の衝突回避で-ha基底
 func nameRedisHA(m *misskeyv1alpha1.Misskey, suffix string) string {
 	return nameRedisInstance(m, suffix) + "-ha"
 }
