@@ -147,11 +147,15 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	// ingress(private range)のX-Forwarded-*信頼用グローバルオプション
 	// 未設定時はCaddyが上書きしclient IP・https喪失
 	// 前段が非privateなら実CIDR調整
+	// metricsでper-handler HTTPメトリクス(リクエスト数/レイテンシ/ステータス)を収集
 	w("{\n")
 	w("\tservers {\n")
 	w("\t\ttrusted_proxies static private_ranges\n")
+	w("\t\tmetrics\n")
 	w("\t}\n")
 	w("}\n\n")
+	// metrics専用リスナ。admin APIは露出させず/metricsのみ配信(Prometheusがscrape)
+	w(fmt.Sprintf(":%d {\n\tmetrics /metrics\n}\n\n", proxyMetricsPort))
 	w(fmt.Sprintf(":%d {\n", proxyPort))
 	w("\tencode gzip\n")
 	w("\theader /assets Cache-Control \"public, max-age=31536000, immutable\"\n\n")

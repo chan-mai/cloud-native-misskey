@@ -81,6 +81,17 @@ func (r *MisskeyReconciler) reconcileMonitoring(ctx context.Context, m *misskeyv
 		return err
 	}
 
+	// Caddy proxy: HTTPメトリクス(metricsポート:9180の/metrics)。Misskey本体は/metrics非対応のため前段Caddyで取得
+	proxyName := nameProxy(m) + "-metrics"
+	if on && boolOr(m.Spec.Proxy.Enabled, true) {
+		sm := buildServiceMonitor(m, proxyName, "proxy", selectorFor(m, "proxy"), "metrics", "/metrics", nil)
+		if err := r.applySSA(ctx, m, sm); err != nil {
+			return err
+		}
+	} else if err := r.deleteIfExists(ctx, monitorObjRef(m, serviceMonitorGVK, proxyName)); err != nil {
+		return err
+	}
+
 	// Redis: standalone=redis_exporter sidecar(Service metrics port)をSM、HA=OT redisExporterをPM
 	desired := map[string]bool{}
 	if on {

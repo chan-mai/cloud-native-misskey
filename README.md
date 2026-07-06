@@ -161,7 +161,7 @@ spec:
 | `network.egressIsolation.enabled` | `false` | egress隔離(opt-in)。app/workerはpublic可、他backendはintra+DNSのみ。postgresは除外 |
 | `network.egressIsolation.dnsNamespace` | `kube-system` | egress隔離時に`:53`を許すDNS namespace |
 | `tenancy.dedicated` | `false` | namespace占有宣言。`quota`(ResourceQuota)/`limitRange`(LimitRange)生成の前提 |
-| `monitoring.enabled` | `false` | PostgreSQL/Redis/MeiliSearchのServiceMonitor/PodMonitorを生成(opt-in, Prometheus Operator必須)。Redisはexporter、Meiliは`/metrics`を自動有効化。`monitoring.labels`でPrometheus selector合わせ |
+| `monitoring.enabled` | `false` | PostgreSQL/Redis/MeiliSearch/proxy(Caddy)のServiceMonitor/PodMonitorを生成(opt-in, Prometheus Operator必須)。Redisはexporter、Meiliは`/metrics`を自動有効化。proxyはCaddyのHTTPメトリクス(RPS/レイテンシ/ステータス)を`:9180/metrics`で公開。`monitoring.labels`でPrometheus selector合わせ |
 | `objectStorage` | (なし) | S3/R2互換media storage(opt-in)。DBのmetaテーブルへ書込むため詳細は[オブジェクトストレージ](#オブジェクトストレージmedia) |
 | `extraConfig` | (なし) | `default.yml`末尾に追記する生YAML |
 
@@ -326,7 +326,7 @@ make test-e2e    # kind e2e
 
 ## 制限事項/TODO
 
-- 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、次回の変更かresync時になります(Deployment/NetworkPolicy/PDB等のnative resourceはOwns()でwatch・即時是正)。
+- 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、reconcile成功後に定期requeue(既定3分、`--drift-resync-interval`で調整)でSSAを再適用して行います。よってドリフトは最大その間隔で自動是正されます(Deployment/NetworkPolicy/PDB等のnative resourceはOwns()でwatch・即時是正)。
 - migration Jobが失敗し切った場合(BackoffLimit超過)、DB接続先やmigrationフラグ等のspec変更時は自動で作り直されます。同一設定のまま再試行するには`kubectl delete job <name>-migrate-<hash>`で削除すると、次のreconcileで再生成されます(同一入力の失敗を無限リトライしないのは、`createIndexConcurrently`失敗時のinvalid index堆積等を避けるためです)。
 - `Ready`/`Phase`はDB/Redis/MeiliSearch/migration/app/worker/proxy/Ingressの全conditionsの集約です。managed Redis/MeiliSearchはSTS(HAはpod)のready数、externalは常にTrueとして扱います。
 - appのオートスケールはCPU/memory(native HPA)のみです。RPSベース(Prometheus + KEDA prometheus trigger)は将来対応です。

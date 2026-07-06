@@ -82,6 +82,7 @@ func (r *MisskeyReconciler) referencedSecretVersions(ctx context.Context, m *mis
 const (
 	misskeyPort      = 3000
 	proxyPort        = 8080
+	proxyMetricsPort = 9180
 	redisPort        = 6379
 	sentinelPort     = 26379
 	meiliPort        = 7700

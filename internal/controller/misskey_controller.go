@@ -51,6 +51,20 @@ type MisskeyReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
+	// DriftResyncInterval: ready収束後の定期requeue間隔。watchしない外部CRD
+	// (CNPG/redis-operator/KEDA)のSSA再適用でドリフトを是正。0で既定
+	DriftResyncInterval time.Duration
+}
+
+// watchしない外部CRDのドリフト是正requeueの既定間隔
+const defaultDriftResyncInterval = 3 * time.Minute
+
+// driftInterval: ready後の定期requeue間隔(未設定は既定)
+func (r *MisskeyReconciler) driftInterval() time.Duration {
+	if r.DriftResyncInterval > 0 {
+		return r.DriftResyncInterval
+	}
+	return defaultDriftResyncInterval
 }
 
 // event: Recorder配線時のみEventを発行(テスト等の未配線ではno-op)
@@ -114,7 +128,8 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// 所有イベントが発火しなくてもstatusが収束するようrequeue
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	return ctrl.Result{}, nil
+	// ready後もwatchしない外部CRDのドリフト是正のため定期requeue
+	return ctrl.Result{RequeueAfter: r.driftInterval()}, nil
 }
 
 // deploymentReady: Deploymentのavailable>=desiredでcondition判定(desired=0はStopped)

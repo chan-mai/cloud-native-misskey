@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -52,6 +53,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var secureMetrics bool
+	var driftResyncInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -59,6 +61,9 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"Serve the metrics endpoint over HTTPS with authn/authz. Disable only for trusted local use.")
+	flag.DurationVar(&driftResyncInterval, "drift-resync-interval", 3*time.Minute,
+		"Interval to re-reconcile each Misskey and re-apply externally-managed CRDs "+
+			"(CNPG/redis-operator/KEDA) to correct drift. 0 uses the built-in default.")
 	// 既定は本番ロギング。--zap-develで詳細な開発ログ
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
@@ -96,9 +101,10 @@ func main() {
 	}
 
 	if err = (&controller.MisskeyReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("cloudnative-misskey"),
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Recorder:            mgr.GetEventRecorder("cloudnative-misskey"),
+		DriftResyncInterval: driftResyncInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Misskey")
 		os.Exit(1)

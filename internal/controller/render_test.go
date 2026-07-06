@@ -397,6 +397,8 @@ func TestRenderCaddyfileDefaults(t *testing.T) {
 		"@api path /api/*",
 		`respond "" {err.status_code}`,
 		"copy_response 200", // メンテナンスの既定ステータス
+		"metrics",           // per-handlerメトリクス有効化
+		":9180 {",           // metrics専用リスナ
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
@@ -1216,4 +1218,38 @@ func TestMonitoringBuilders(t *testing.T) {
 	if c.Name != "metrics" || len(c.Ports) != 1 || c.Ports[0].ContainerPort != redisExporterPort {
 		t.Errorf("exporter container wrong: %+v", c)
 	}
+
+	// proxy: Caddy metricsのServiceMonitor(auth無し)
+	psm := buildServiceMonitor(m, "proxy-metrics", "proxy", selectorFor(m, "proxy"), "metrics", "/metrics", nil)
+	peps, _, _ := unstructured.NestedSlice(psm.Object, "spec", "endpoints")
+	pep0 := peps[0].(map[string]any)
+	if pep0["port"] != "metrics" || pep0["path"] != "/metrics" {
+		t.Errorf("proxy SM endpoint: %v", pep0)
+	}
+	if _, ok := pep0["authorization"]; ok {
+		t.Error("proxy SM must not carry authorization")
+	}
+}
+
+func TestProxyMetricsPort(t *testing.T) {
+	m := newMisskey()
+	// proxyコンテナはmetricsポート(:9180)を公開
+	proxyPod := buildCaddyPodSpec(m, "Caddyfile", false, "proxy")
+	if !hasContainerPort(proxyPod.Containers[0].Ports, proxyMetricsPort) {
+		t.Errorf("proxy container missing metrics port %d: %+v", proxyMetricsPort, proxyPod.Containers[0].Ports)
+	}
+	// maintenanceはmetricsポートを持たない
+	maintPod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true, "maintenance")
+	if hasContainerPort(maintPod.Containers[0].Ports, proxyMetricsPort) {
+		t.Errorf("maintenance container must not expose metrics port: %+v", maintPod.Containers[0].Ports)
+	}
+}
+
+func hasContainerPort(ports []corev1.ContainerPort, p int32) bool {
+	for _, cp := range ports {
+		if cp.ContainerPort == p {
+			return true
+		}
+	}
+	return false
 }

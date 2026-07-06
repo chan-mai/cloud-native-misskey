@@ -68,6 +68,12 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 		mounts = append(mounts, corev1.VolumeMount{Name: "maintenance-html", MountPath: "/usr/share/caddy", ReadOnly: true})
 	}
 
+	// proxyのみmetricsリスナ(:9180)を公開。maintenanceは対象外
+	ports := []corev1.ContainerPort{{ContainerPort: proxyPort}}
+	if component == "proxy" {
+		ports = append(ports, corev1.ContainerPort{Name: "metrics", ContainerPort: proxyMetricsPort})
+	}
+
 	return corev1.PodSpec{
 		SecurityContext:           nonRootPodSecurityContext(genericNonRootUID),
 		TopologySpreadConstraints: spreadConstraints(labelsFor(m, component)),
@@ -87,7 +93,7 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 				Command:         []string{"/caddy-bin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
 				SecurityContext: restrictedContainerSecurityContext(),
 				Resources:       resourcesOr(m.Spec.Proxy.Resources, "10m", "32Mi", "128Mi"),
-				Ports:           []corev1.ContainerPort{{ContainerPort: proxyPort}},
+				Ports:           ports,
 				VolumeMounts:    mounts,
 			},
 		},
@@ -115,6 +121,14 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 			Port:       80,
 			TargetPort: intstr.FromInt32(proxyPort),
 		}}
+		// monitoring時はCaddyのmetricsポートを公開(ServiceMonitorがscrape)
+		if monitoringEnabled(m) {
+			psvc.Spec.Ports = append(psvc.Spec.Ports, corev1.ServicePort{
+				Name:       "metrics",
+				Port:       proxyMetricsPort,
+				TargetPort: intstr.FromInt32(proxyMetricsPort),
+			})
+		}
 		return nil
 	}); err != nil {
 		return err
