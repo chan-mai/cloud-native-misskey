@@ -388,6 +388,65 @@ func TestRenderDefaultYMLSQLLike(t *testing.T) {
 	}
 }
 
+func TestRenderDefaultYMLPerformanceProxyFiles(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Performance = misskeyv1alpha1.PerformanceSpec{
+		DeliverJobConcurrency: int32Ptr(64),
+		InboxJobConcurrency:   int32Ptr(32),
+		DeliverJobPerSec:      int32Ptr(128),
+		InboxJobPerSec:        int32Ptr(64),
+		RelationshipJobPerSec: int32Ptr(16),
+		DeliverJobMaxAttempts: int32Ptr(10),
+		InboxJobMaxAttempts:   int32Ptr(8),
+	}
+	m.Spec.OutboundProxy = misskeyv1alpha1.OutboundProxySpec{
+		HTTP: "http://proxy:3128", SMTP: "http://proxy:3128",
+		BypassHosts: []string{"hcaptcha.com", "challenges.cloudflare.com"},
+	}
+	m.Spec.Files = misskeyv1alpha1.FilesSpec{
+		MaxFileSize:      int64Ptr(262144000),
+		MediaProxy:       "https://mp.example.com/proxy",
+		ProxyRemoteFiles: boolPtr(false),
+	}
+	out := renderDefaultYML(m, resolve(m))
+	for _, s := range []string{
+		"deliverJobConcurrency: 64",
+		"inboxJobConcurrency: 32",
+		"deliverJobPerSec: 128",
+		"inboxJobPerSec: 64",
+		"relationshipJobPerSec: 16",
+		"deliverJobMaxAttempts: 10",
+		"inboxJobMaxAttempts: 8",
+		"proxy: http://proxy:3128",
+		"proxySmtp: http://proxy:3128",
+		"proxyBypassHosts: [hcaptcha.com, challenges.cloudflare.com]",
+		"maxFileSize: 262144000",
+		"mediaProxy: https://mp.example.com/proxy",
+		"proxyRemoteFiles: false",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("default.yml missing %q\n---\n%s", s, out)
+		}
+	}
+}
+
+func TestRenderDefaultYMLTuningOmittedByDefault(t *testing.T) {
+	out := renderDefaultYML(newMisskey(), resolve(newMisskey()))
+	// 既定はproxyRemoteFiles: trueのみ出力。他のknobsは出さず既存出力を不変に保つ
+	if !strings.Contains(out, "proxyRemoteFiles: true") {
+		t.Errorf("proxyRemoteFiles: true must be emitted by default:\n%s", out)
+	}
+	for _, s := range []string{
+		"deliverJobConcurrency", "inboxJobConcurrency", "deliverJobPerSec",
+		"relationshipJobPerSec", "JobMaxAttempts", "proxy:", "proxySmtp",
+		"proxyBypassHosts", "maxFileSize", "mediaProxy",
+	} {
+		if strings.Contains(out, s) {
+			t.Errorf("unset tuning key %q must be omitted:\n%s", s, out)
+		}
+	}
+}
+
 func TestRenderCaddyfileDefaults(t *testing.T) {
 	out := renderCaddyfile(newMisskey())
 

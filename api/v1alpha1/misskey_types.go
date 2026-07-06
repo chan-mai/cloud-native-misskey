@@ -141,6 +141,96 @@ type MisskeySpec struct {
 	// managed backends (PostgreSQL/Redis/MeiliSearch).
 	// +optional
 	Monitoring MonitoringSpec `json:"monitoring,omitempty"`
+
+	// Performance tunes the job-queue processor via default.yml. All fields are
+	// optional; unset ones fall back to Misskey's own defaults (not written out).
+	// +optional
+	Performance PerformanceSpec `json:"performance,omitempty"`
+
+	// OutboundProxy routes Misskey's outgoing HTTP(S)/SMTP through a forward proxy
+	// (default.yml proxy/proxySmtp/proxyBypassHosts). Distinct from spec.proxy,
+	// which is the inbound Caddy reverse proxy.
+	// +optional
+	OutboundProxy OutboundProxySpec `json:"outboundProxy,omitempty"`
+
+	// Files tunes media/file handling written to default.yml (max upload size,
+	// remote-file proxying, media proxy).
+	// +optional
+	Files FilesSpec `json:"files,omitempty"`
+}
+
+// PerformanceSpec tunes the job-queue processor. Each field maps to the matching
+// default.yml key and is emitted only when set; omit to use Misskey's default.
+type PerformanceSpec struct {
+	// DeliverJobConcurrency caps concurrent activity deliveries per worker.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	DeliverJobConcurrency *int32 `json:"deliverJobConcurrency,omitempty"`
+
+	// InboxJobConcurrency caps concurrent inbox (received activity) processing per worker.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	InboxJobConcurrency *int32 `json:"inboxJobConcurrency,omitempty"`
+
+	// DeliverJobPerSec rate-limits enqueued deliver jobs per second.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	DeliverJobPerSec *int32 `json:"deliverJobPerSec,omitempty"`
+
+	// InboxJobPerSec rate-limits enqueued inbox jobs per second.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	InboxJobPerSec *int32 `json:"inboxJobPerSec,omitempty"`
+
+	// RelationshipJobPerSec rate-limits follow/unfollow relationship jobs per second.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RelationshipJobPerSec *int32 `json:"relationshipJobPerSec,omitempty"`
+
+	// DeliverJobMaxAttempts is the retry count for a failed deliver job.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	DeliverJobMaxAttempts *int32 `json:"deliverJobMaxAttempts,omitempty"`
+
+	// InboxJobMaxAttempts is the retry count for a failed inbox job.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	InboxJobMaxAttempts *int32 `json:"inboxJobMaxAttempts,omitempty"`
+}
+
+// OutboundProxySpec configures Misskey's forward proxy for outgoing traffic.
+type OutboundProxySpec struct {
+	// HTTP is the forward proxy URL for outgoing HTTP(S), e.g. http://proxy:3128
+	// (default.yml proxy).
+	// +optional
+	HTTP string `json:"http,omitempty"`
+
+	// SMTP is a separate forward proxy URL for outgoing SMTP (default.yml proxySmtp).
+	// +optional
+	SMTP string `json:"smtp,omitempty"`
+
+	// BypassHosts are hosts reached directly, bypassing the proxy (default.yml
+	// proxyBypassHosts), e.g. captcha or translation endpoints.
+	// +optional
+	BypassHosts []string `json:"bypassHosts,omitempty"`
+}
+
+// FilesSpec tunes media/file handling in default.yml.
+type FilesSpec struct {
+	// MaxFileSize is the maximum upload size in bytes (default.yml maxFileSize).
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxFileSize *int64 `json:"maxFileSize,omitempty"`
+
+	// MediaProxy is the URL of an external media proxy for remote files
+	// (default.yml mediaProxy).
+	// +optional
+	MediaProxy string `json:"mediaProxy,omitempty"`
+
+	// ProxyRemoteFiles proxies remote files through this server (default.yml
+	// proxyRemoteFiles). Defaults to true when unset.
+	// +optional
+	ProxyRemoteFiles *bool `json:"proxyRemoteFiles,omitempty"`
 }
 
 // MonitoringSpec configures Prometheus scraping of the managed backends. Requires

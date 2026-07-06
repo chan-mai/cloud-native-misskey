@@ -27,6 +27,13 @@ spec:
       requests: { cpu: 100m, memory: 500Mi }
       limits: { memory: 1Gi }
 
+  # Job-queue tuning written to default.yml. Unset keys use Misskey's defaults.
+  performance:
+    deliverJobConcurrency: 128
+    inboxJobConcurrency: 16
+    deliverJobPerSec: 128
+    inboxJobPerSec: 32
+
   search:
     provider: meilisearch
     meilisearch:

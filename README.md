@@ -163,7 +163,16 @@ spec:
 | `tenancy.dedicated` | `false` | namespace占有宣言。`quota`(ResourceQuota)/`limitRange`(LimitRange)生成の前提 |
 | `monitoring.enabled` | `false` | PostgreSQL/Redis/MeiliSearch/proxy(Caddy)のServiceMonitor/PodMonitorを生成(opt-in, Prometheus Operator必須)。Redisはexporter、Meiliは`/metrics`を自動有効化。proxyはCaddyのHTTPメトリクス(RPS/レイテンシ/ステータス)を`:9180/metrics`で公開。`monitoring.labels`でPrometheus selector合わせ |
 | `objectStorage` | (なし) | S3/R2互換media storage(opt-in)。DBのmetaテーブルへ書込むため詳細は[オブジェクトストレージ](#オブジェクトストレージmedia) |
+| `performance` | (Misskey既定) | job queueチューニング。`deliverJobConcurrency`/`inboxJobConcurrency`/`deliverJobPerSec`/`inboxJobPerSec`/`relationshipJobPerSec`/`deliverJobMaxAttempts`/`inboxJobMaxAttempts`。未設定キーは`default.yml`に出さずMisskey既定に委ねる |
+| `outboundProxy` | (なし) | 外向きforward proxy。`http`(→`proxy`)/`smtp`(→`proxySmtp`)/`bypassHosts`(→`proxyBypassHosts`)。`spec.proxy`(前段Caddy)とは別 |
+| `files.maxFileSize` | (Misskey既定) | アップロード上限(bytes) |
+| `files.mediaProxy` | (なし) | リモートファイルのmedia proxy URL |
+| `files.proxyRemoteFiles` | `true` | リモートファイルを自鯖経由でproxy |
 | `extraConfig` | (なし) | `default.yml`末尾に追記する生YAML |
+
+`performance`/`outboundProxy`/`files`は`default.yml`のキーをそのまま第一級化したものです。設定したキーのみ出力し、未設定なら従来どおりMisskey既定に委ねます(既存の描画結果は不変)。`proxyRemoteFiles`も従来固定`true`から`files.proxyRemoteFiles`で上書き可能になりました(既定`true`で挙動不変)。
+
+SMTP(送信メール)やcaptchaは`default.yml`でなくDBの`meta`テーブル管理(objectStorageと同方式)のため、ここではモデル化していません。管理画面で設定してください。
 
 ## フォークイメージ
 

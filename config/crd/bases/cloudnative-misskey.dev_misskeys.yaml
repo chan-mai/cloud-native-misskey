@@ -260,6 +260,28 @@ spec:
                   ExtraConfig is raw YAML appended verbatim to the generated default.yml.
                   Use it for settings not modeled by this CRD.
                 type: string
+              files:
+                description: |-
+                  Files tunes media/file handling written to default.yml (max upload size,
+                  remote-file proxying, media proxy).
+                properties:
+                  maxFileSize:
+                    description: MaxFileSize is the maximum upload size in bytes (default.yml
+                      maxFileSize).
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  mediaProxy:
+                    description: |-
+                      MediaProxy is the URL of an external media proxy for remote files
+                      (default.yml mediaProxy).
+                    type: string
+                  proxyRemoteFiles:
+                    description: |-
+                      ProxyRemoteFiles proxies remote files through this server (default.yml
+                      proxyRemoteFiles). Defaults to true when unset.
+                    type: boolean
+                type: object
               idGenerationMethod:
                 default: aidx
                 description: |-
@@ -620,6 +642,77 @@ spec:
                 x-kubernetes-validations:
                 - message: extraColumns keys must be valid SQL identifiers
                   rule: '!has(self.extraColumns) || self.extraColumns.all(k, k.matches(''^[A-Za-z_][A-Za-z0-9_]*$''))'
+              outboundProxy:
+                description: |-
+                  OutboundProxy routes Misskey's outgoing HTTP(S)/SMTP through a forward proxy
+                  (default.yml proxy/proxySmtp/proxyBypassHosts). Distinct from spec.proxy,
+                  which is the inbound Caddy reverse proxy.
+                properties:
+                  bypassHosts:
+                    description: |-
+                      BypassHosts are hosts reached directly, bypassing the proxy (default.yml
+                      proxyBypassHosts), e.g. captcha or translation endpoints.
+                    items:
+                      type: string
+                    type: array
+                  http:
+                    description: |-
+                      HTTP is the forward proxy URL for outgoing HTTP(S), e.g. http://proxy:3128
+                      (default.yml proxy).
+                    type: string
+                  smtp:
+                    description: SMTP is a separate forward proxy URL for outgoing
+                      SMTP (default.yml proxySmtp).
+                    type: string
+                type: object
+              performance:
+                description: |-
+                  Performance tunes the job-queue processor via default.yml. All fields are
+                  optional; unset ones fall back to Misskey's own defaults (not written out).
+                properties:
+                  deliverJobConcurrency:
+                    description: DeliverJobConcurrency caps concurrent activity deliveries
+                      per worker.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  deliverJobMaxAttempts:
+                    description: DeliverJobMaxAttempts is the retry count for a failed
+                      deliver job.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  deliverJobPerSec:
+                    description: DeliverJobPerSec rate-limits enqueued deliver jobs
+                      per second.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  inboxJobConcurrency:
+                    description: InboxJobConcurrency caps concurrent inbox (received
+                      activity) processing per worker.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  inboxJobMaxAttempts:
+                    description: InboxJobMaxAttempts is the retry count for a failed
+                      inbox job.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  inboxJobPerSec:
+                    description: InboxJobPerSec rate-limits enqueued inbox jobs per
+                      second.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  relationshipJobPerSec:
+                    description: RelationshipJobPerSec rate-limits follow/unfollow
+                      relationship jobs per second.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
               postgres:
                 description: Postgres configures the PostgreSQL backend (CNPG-managed
                   or external).

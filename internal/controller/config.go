@@ -118,13 +118,57 @@ func renderDefaultYML(m *misskeyv1alpha1.Misskey, p plan) string {
 	w("\n")
 
 	w("id: '%s'\n", stringOr(m.Spec.IDGenerationMethod, "aidx"))
-	w("proxyRemoteFiles: true\n")
+	w("proxyRemoteFiles: %s\n", strconv.FormatBool(boolOr(m.Spec.Files.ProxyRemoteFiles, true)))
 	w("signToActivityPubGet: true\n")
+
+	// 第一級化した任意knobs(未設定キーは出力せずMisskey既定に委ねる)
+	renderPerformance(w, m.Spec.Performance)
+	renderOutboundProxy(w, m.Spec.OutboundProxy)
+	renderFiles(w, m.Spec.Files)
 
 	if strings.TrimSpace(m.Spec.ExtraConfig) != "" {
 		w("\n# --- extraConfig ---\n%s\n", strings.TrimRight(m.Spec.ExtraConfig, "\n"))
 	}
 	return b.String()
+}
+
+// renderPerformance: job-queue knobsをdefault.ymlへ(未設定は出力しない=Misskey既定に委ねる)
+func renderPerformance(w func(string, ...any), p misskeyv1alpha1.PerformanceSpec) {
+	writeInt := func(key string, v *int32) {
+		if v != nil {
+			w("%s: %d\n", key, *v)
+		}
+	}
+	writeInt("deliverJobConcurrency", p.DeliverJobConcurrency)
+	writeInt("inboxJobConcurrency", p.InboxJobConcurrency)
+	writeInt("deliverJobPerSec", p.DeliverJobPerSec)
+	writeInt("inboxJobPerSec", p.InboxJobPerSec)
+	writeInt("relationshipJobPerSec", p.RelationshipJobPerSec)
+	writeInt("deliverJobMaxAttempts", p.DeliverJobMaxAttempts)
+	writeInt("inboxJobMaxAttempts", p.InboxJobMaxAttempts)
+}
+
+// renderOutboundProxy: 外向きforward proxy設定(未設定キーは出力しない)
+func renderOutboundProxy(w func(string, ...any), o misskeyv1alpha1.OutboundProxySpec) {
+	if o.HTTP != "" {
+		w("proxy: %s\n", o.HTTP)
+	}
+	if o.SMTP != "" {
+		w("proxySmtp: %s\n", o.SMTP)
+	}
+	if len(o.BypassHosts) > 0 {
+		w("proxyBypassHosts: [%s]\n", strings.Join(o.BypassHosts, ", "))
+	}
+}
+
+// renderFiles: media/file設定(未設定キーは出力しない)。proxyRemoteFilesは既定出力のため別処理
+func renderFiles(w func(string, ...any), f misskeyv1alpha1.FilesSpec) {
+	if f.MaxFileSize != nil {
+		w("maxFileSize: %d\n", *f.MaxFileSize)
+	}
+	if f.MediaProxy != "" {
+		w("mediaProxy: %s\n", f.MediaProxy)
+	}
 }
 
 // migratePlan: migration用にpを複製し、DB経路をprimary直結・no-replicationへ倒す
