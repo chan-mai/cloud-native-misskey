@@ -116,6 +116,7 @@ rules:
   - monitoring.coreos.com
   resources:
   - podmonitors
+  - prometheusrules
   - servicemonitors
   verbs:
   - create

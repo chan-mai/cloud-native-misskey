@@ -36,6 +36,10 @@ spec:
       name: Database
       priority: 1
       type: string
+    - jsonPath: .status.backup.lastSuccessfulBackup
+      name: LastBackup
+      priority: 1
+      type: date
     - jsonPath: .status.searchIndex
       name: Index
       priority: 1
@@ -398,6 +402,23 @@ spec:
                     description: RedisExporterImage is the redis_exporter sidecar
                       image for standalone Redis.
                     type: string
+                  rules:
+                    description: |-
+                      Rules generates a PrometheusRule with baseline alerts (proxy 5xx ratio,
+                      backup staleness when postgres.backup is set). On by default while
+                      monitoring is enabled.
+                    properties:
+                      backupMaxAge:
+                        default: 48h
+                        description: |-
+                          BackupMaxAge is how old the latest base backup may become before the
+                          MisskeyBackupStale alert fires.
+                        type: string
+                      enabled:
+                        default: true
+                        description: Enabled toggles the PrometheusRule generation.
+                        type: boolean
+                    type: object
                 type: object
               network:
                 description: |-
@@ -2933,6 +2954,21 @@ spec:
           status:
             description: MisskeyStatus defines the observed state of a Misskey instance.
             properties:
+              backup:
+                description: Backup mirrors the CNPG backup status of the managed
+                  database.
+                properties:
+                  firstRecoverabilityPoint:
+                    description: FirstRecoverabilityPoint is the earliest available
+                      PITR target.
+                    format: date-time
+                    type: string
+                  lastSuccessfulBackup:
+                    description: LastSuccessfulBackup is when the latest base backup
+                      completed.
+                    format: date-time
+                    type: string
+                type: object
               backupVerification:
                 description: |-
                   BackupVerification is the outcome of the last scheduled restore test

@@ -166,6 +166,7 @@ spec:
 | `network.egressIsolation.dnsNamespace` | `kube-system` | egress隔離時に`:53`を許すDNS namespace |
 | `tenancy.dedicated` | `false` | namespace占有宣言。`quota`(ResourceQuota)/`limitRange`(LimitRange)生成の前提 |
 | `monitoring.enabled` | `false` | PostgreSQL/Redis/MeiliSearch/proxy(Caddy)のServiceMonitor/PodMonitorを生成(opt-in, Prometheus Operator必須)。Redisはexporter、Meiliは`/metrics`を自動有効化。proxyはCaddyのHTTPメトリクス(RPS/レイテンシ/ステータス)を`:9180/metrics`で公開。`monitoring.labels`でPrometheus selector合わせ |
+| `monitoring.rules` | 有効時on | 基本アラートのPrometheusRule(`<name>-alerts`)を生成。proxy 5xx比率>5%と、backup設定時は最新バックアップの鮮度(`backupMaxAge`既定48h)。`rules.enabled: false`でopt-out |
 | `objectStorage` | (なし) | S3/R2互換media storage(opt-in)。DBのmetaテーブルへ書込むため詳細は[オブジェクトストレージ](#オブジェクトストレージmedia) |
 | `performance` | (Misskey既定) | job queueチューニング。`deliverJobConcurrency`/`inboxJobConcurrency`/`deliverJobPerSec`/`inboxJobPerSec`/`relationshipJobPerSec`/`deliverJobMaxAttempts`/`inboxJobMaxAttempts`。未設定キーは`default.yml`に出さずMisskey既定に委ねる |
 | `outboundProxy` | (なし) | 外向きforward proxy。`http`(→`proxy`)/`smtp`(→`proxySmtp`)/`bypassHosts`(→`proxyBypassHosts`)。`spec.proxy`(前段Caddy)とは別 |

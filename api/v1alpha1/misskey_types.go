@@ -265,6 +265,26 @@ type MonitoringSpec struct {
 	// +kubebuilder:default="oliver006/redis_exporter:v1.62.0-alpine"
 	// +optional
 	RedisExporterImage string `json:"redisExporterImage,omitempty"`
+
+	// Rules generates a PrometheusRule with baseline alerts (proxy 5xx ratio,
+	// backup staleness when postgres.backup is set). On by default while
+	// monitoring is enabled.
+	// +optional
+	Rules *MonitoringRules `json:"rules,omitempty"`
+}
+
+// MonitoringRules configures the generated PrometheusRule.
+type MonitoringRules struct {
+	// Enabled toggles the PrometheusRule generation.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// BackupMaxAge is how old the latest base backup may become before the
+	// MisskeyBackupStale alert fires.
+	// +kubebuilder:default="48h"
+	// +optional
+	BackupMaxAge metav1.Duration `json:"backupMaxAge,omitempty"`
 }
 
 // MigrationSpec configures the schema-migration Job.
@@ -1306,6 +1326,21 @@ type MisskeyStatus struct {
 	// (postgres.backup.verify).
 	// +optional
 	BackupVerification *BackupVerificationStatus `json:"backupVerification,omitempty"`
+
+	// Backup mirrors the CNPG backup status of the managed database.
+	// +optional
+	Backup *BackupStatus `json:"backup,omitempty"`
+}
+
+// BackupStatus mirrors CNPG's backup-related cluster status.
+type BackupStatus struct {
+	// LastSuccessfulBackup is when the latest base backup completed.
+	// +optional
+	LastSuccessfulBackup metav1.Time `json:"lastSuccessfulBackup,omitempty"`
+
+	// FirstRecoverabilityPoint is the earliest available PITR target.
+	// +optional
+	FirstRecoverabilityPoint metav1.Time `json:"firstRecoverabilityPoint,omitempty"`
 }
 
 // BackupVerificationStatus records the last restore test of the backups.
@@ -1333,6 +1368,7 @@ type BackupVerificationStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Database",type=string,JSONPath=`.status.databaseHost`,priority=1
+// +kubebuilder:printcolumn:name="LastBackup",type=date,JSONPath=`.status.backup.lastSuccessfulBackup`,priority=1
 // +kubebuilder:printcolumn:name="Index",type=string,JSONPath=`.status.searchIndex`,priority=1
 
 // Misskey is the Schema for the misskeys API.

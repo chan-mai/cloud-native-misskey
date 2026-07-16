@@ -90,7 +90,7 @@ func (r *MisskeyReconciler) event(m *misskeyv1alpha1.Misskey, eventType, reason,
 // +kubebuilder:rbac:groups=redis.redis.opstreelabs.in,resources=redisreplications;redissentinels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects;triggerauthentications,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;podmonitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors;podmonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
 
 // Misskeyインスタンスを望ましい状態へ収束させる
 func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -519,9 +519,37 @@ func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1
 		} else {
 			cur.Status.SearchIndex = ""
 		}
+		cur.Status.Backup = r.readBackupStatus(ctx, m, p)
 		return r.Status().Update(ctx, cur)
 	})
 	return ready, client.IgnoreNotFound(err)
+}
+
+// readBackupStatus: CNPG Cluster statusのバックアップ時刻をstatusへ写す(backup有効時のみ)
+func (r *MisskeyReconciler) readBackupStatus(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) *misskeyv1alpha1.BackupStatus {
+	if !p.dbManaged || m.Spec.Postgres.Backup == nil {
+		return nil
+	}
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(cnpgClusterGVK)
+	if err := r.Get(ctx, types.NamespacedName{Name: nameDB(m), Namespace: m.Namespace}, cluster); err != nil {
+		return nil
+	}
+	st := &misskeyv1alpha1.BackupStatus{}
+	if s, _, _ := unstructured.NestedString(cluster.Object, "status", "lastSuccessfulBackup"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			st.LastSuccessfulBackup = metav1.NewTime(t)
+		}
+	}
+	if s, _, _ := unstructured.NestedString(cluster.Object, "status", "firstRecoverabilityPoint"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			st.FirstRecoverabilityPoint = metav1.NewTime(t)
+		}
+	}
+	if st.LastSuccessfulBackup.IsZero() && st.FirstRecoverabilityPoint.IsZero() {
+		return nil
+	}
+	return st
 }
 
 // misskeysInNamespace: Secret変更を同一namespaceの全Misskeyへ広播(参照Secretのローテ検知)

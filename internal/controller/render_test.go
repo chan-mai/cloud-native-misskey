@@ -1130,6 +1130,43 @@ func TestBackupVerifyDue(t *testing.T) {
 	}
 }
 
+func TestBuildPrometheusRule(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{DestinationPath: "s3://bk/misskey"}
+	rule := buildPrometheusRule(m)
+
+	if rule.GetName() != "example-alerts" || rule.GetKind() != "PrometheusRule" {
+		t.Fatalf("rule identity wrong: %s/%s", rule.GetKind(), rule.GetName())
+	}
+	group := rule.Object["spec"].(map[string]any)["groups"].([]any)[0].(map[string]any)
+	rules := group["rules"].([]any)
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 alerts, got %d: %+v", len(rules), rules)
+	}
+	proxyExpr := rules[0].(map[string]any)["expr"].(string)
+	if !strings.Contains(proxyExpr, `service="example-proxy"`) || !strings.Contains(proxyExpr, `namespace="ns"`) {
+		t.Errorf("proxy alert must scope to own instance: %s", proxyExpr)
+	}
+	backupExpr := rules[1].(map[string]any)["expr"].(string)
+	// 既定48h=172800秒, verify用podを除外する序数限定regex
+	if !strings.Contains(backupExpr, "> 172800") || !strings.Contains(backupExpr, `pod=~"^example-db-[0-9]+$"`) {
+		t.Errorf("backup alert expr: %s", backupExpr)
+	}
+
+	// backup未設定 → proxyアラートのみ
+	m.Spec.Postgres.Backup = nil
+	rules = buildPrometheusRule(m).Object["spec"].(map[string]any)["groups"].([]any)[0].(map[string]any)["rules"].([]any)
+	if len(rules) != 1 || rules[0].(map[string]any)["alert"] != "MisskeyProxy5xxHigh" {
+		t.Errorf("expected proxy alert only: %+v", rules)
+	}
+
+	// proxy無効+backup無し → nil(空のPrometheusRuleを作らない)
+	m.Spec.Proxy.Enabled = boolPtr(false)
+	if buildPrometheusRule(m) != nil {
+		t.Error("no-target rule must be nil")
+	}
+}
+
 func TestBuildDBScheduledBackup(t *testing.T) {
 	m := newMisskey()
 	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{

@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,6 +33,7 @@ import (
 var (
 	serviceMonitorGVK = schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}
 	podMonitorGVK     = schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PodMonitor"}
+	prometheusRuleGVK = schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "PrometheusRule"}
 )
 
 const redisExporterPort = 9121
@@ -125,7 +127,78 @@ func (r *MisskeyReconciler) reconcileMonitoring(ctx context.Context, m *misskeyv
 			return err
 		}
 	}
-	return nil
+
+	// 基本アラート(PrometheusRule)。対象alertが1つも無い構成では作らない
+	rule := buildPrometheusRule(m)
+	if on && monitoringRulesEnabled(m) && rule != nil {
+		return r.applySSA(ctx, m, rule)
+	}
+	return r.deleteIfExists(ctx, monitorObjRef(m, prometheusRuleGVK, m.Name+"-alerts"))
+}
+
+// monitoringRulesEnabled: rules生成の有効判定(monitoring有効下で既定on)
+func monitoringRulesEnabled(m *misskeyv1alpha1.Misskey) bool {
+	if m.Spec.Monitoring.Rules == nil {
+		return true
+	}
+	return boolOr(m.Spec.Monitoring.Rules.Enabled, true)
+}
+
+// buildPrometheusRule: 基本アラート。対象なしならnil
+func buildPrometheusRule(m *misskeyv1alpha1.Misskey) *unstructured.Unstructured {
+	var rules []any
+
+	// proxyの5xx比率>5%が10分継続。metricsはservice/namespaceラベルで自インスタンスに限定
+	if boolOr(m.Spec.Proxy.Enabled, true) {
+		sel := fmt.Sprintf(`namespace=%q,service=%q`, m.Namespace, nameProxy(m))
+		rules = append(rules, map[string]any{
+			"alert": "MisskeyProxy5xxHigh",
+			"expr": fmt.Sprintf(
+				`sum(rate(caddy_http_request_duration_seconds_count{%s,code=~"5.."}[5m])) / sum(rate(caddy_http_request_duration_seconds_count{%s}[5m])) > 0.05`,
+				sel, sel),
+			"for":    "10m",
+			"labels": map[string]any{"severity": "warning"},
+			"annotations": map[string]any{
+				"summary": fmt.Sprintf("Misskey %s/%s: proxy 5xx ratio above 5%% for 10m", m.Namespace, m.Name),
+			},
+		})
+	}
+
+	// 最新base backupの鮮度。pod正規表現はinstance pod(<name>-db-<序数>)のみに絞り
+	// 復元検証用<name>-db-verify-*を除外
+	if m.Spec.Postgres.External == nil && m.Spec.Postgres.Backup != nil {
+		maxAge := 48 * time.Hour
+		if m.Spec.Monitoring.Rules != nil && m.Spec.Monitoring.Rules.BackupMaxAge.Duration > 0 {
+			maxAge = m.Spec.Monitoring.Rules.BackupMaxAge.Duration
+		}
+		rules = append(rules, map[string]any{
+			"alert": "MisskeyBackupStale",
+			"expr": fmt.Sprintf(
+				`time() - max(cnpg_collector_last_available_backup_timestamp{namespace=%q,pod=~"^%s-[0-9]+$"}) > %d`,
+				m.Namespace, nameDB(m), int64(maxAge.Seconds())),
+			"for":    "1h",
+			"labels": map[string]any{"severity": "warning"},
+			"annotations": map[string]any{
+				"summary": fmt.Sprintf("Misskey %s/%s: no successful base backup within %s", m.Namespace, m.Name, maxAge),
+			},
+		})
+	}
+
+	if len(rules) == 0 {
+		return nil
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(prometheusRuleGVK)
+	u.SetName(m.Name + "-alerts")
+	u.SetNamespace(m.Namespace)
+	u.SetLabels(monitorLabels(m, "alerts"))
+	u.Object["spec"] = map[string]any{
+		"groups": []any{map[string]any{
+			"name":  "cloudnative-misskey." + m.Name,
+			"rules": rules,
+		}},
+	}
+	return u
 }
 
 // buildServiceMonitor: 指定Serviceのport/pathをscrape(auth任意)
