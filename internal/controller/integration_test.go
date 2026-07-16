@@ -321,7 +321,9 @@ func TestSuspendResume(t *testing.T) {
 	// suspend中のimage変更では新migration Jobを作らない
 	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Image = "misskey/misskey:v2" })
 	reconcile()
-	cl.Get(ctx, req.NamespacedName, cur)
+	if err := cl.Get(ctx, req.NamespacedName, cur); err != nil {
+		t.Fatal(err)
+	}
 	if exists(ctx, cl, &batchv1.Job{}, nameMigrate(cur), ns) {
 		t.Error("suspend中に新migration Jobが生成された")
 	}

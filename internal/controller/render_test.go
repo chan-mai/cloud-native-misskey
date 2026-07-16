@@ -1124,10 +1124,10 @@ func TestBackupVerifyDue(t *testing.T) {
 		t.Error("初回は即due")
 	}
 	m.Status.BackupVerification = &misskeyv1alpha1.BackupVerificationStatus{LastVerifiedTime: now}
-	if backupVerifyDue(m, time.Hour, now.Time.Add(30*time.Minute)) {
+	if backupVerifyDue(m, time.Hour, now.Add(30*time.Minute)) {
 		t.Error("interval未満でdueになった")
 	}
-	if !backupVerifyDue(m, time.Hour, now.Time.Add(2*time.Hour)) {
+	if !backupVerifyDue(m, time.Hour, now.Add(2*time.Hour)) {
 		t.Error("interval超過でdueにならない")
 	}
 }
@@ -1256,7 +1256,8 @@ func TestResolveImageTrackDigest(t *testing.T) {
 
 func TestChannelBucket(t *testing.T) {
 	// 決定性
-	if channelBucket("ns", "a") != channelBucket("ns", "a") {
+	b1, b2 := channelBucket("ns", "a"), channelBucket("ns", "a")
+	if b1 != b2 {
 		t.Error("bucket must be deterministic")
 	}
 	// 0-99域と分散(全一致しないこと)
