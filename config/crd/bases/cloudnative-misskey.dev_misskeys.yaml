@@ -375,6 +375,28 @@ spec:
                     description: Host overrides the ingress host. Defaults to the
                       host part of spec.url.
                     type: string
+                  issuerRef:
+                    description: |-
+                      IssuerRef points at a cert-manager Issuer/ClusterIssuer. The operator
+                      stamps the cert-manager annotation and a TLS block (secret "<name>-tls"
+                      unless tlsSecretName overrides it) so the certificate is provisioned
+                      automatically. Requires cert-manager in the cluster.
+                    properties:
+                      kind:
+                        default: ClusterIssuer
+                        description: Kind of the issuer.
+                        enum:
+                        - Issuer
+                        - ClusterIssuer
+                        type: string
+                      name:
+                        description: Name of the issuer.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   tlsSecretName:
                     description: TLSSecretName enables a TLS block referencing the
                       named secret. Optional.

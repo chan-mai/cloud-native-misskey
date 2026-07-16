@@ -160,6 +160,7 @@ spec:
 | `migration.preBackup` | `false` | image変更ごとのmigration前にon-demand CNPG Backupを取り、完了までmigrationをgate(opt-in)。失敗した一方向migrationを`postgres.recovery`で巻き戻せる状態を担保。managed DB+`postgres.backup`必須 |
 | `proxy.enabled` | `true` | Caddy proxyの有無 |
 | `ingress.className` | `nginx` | ingressClassName |
+| `ingress.issuerRef` | (なし) | cert-manager連携。`{name, kind(既定ClusterIssuer)}`を指定するとissuer annotationとTLS block(secret `<name>-tls`, `tlsSecretName`で上書き可)を自動設定。cert-manager必須 |
 | `network.isolation.enabled` | `true` | backend(app/worker/redis/meili)へのingressをintra-instanceに限る。公開入口(proxy)とpostgres(CNPGに委任)は対象外 |
 | `network.isolation.allowedNamespaces` | (なし) | backendへの到達を追加で許すnamespace名。監視namespaceからのscrape等 |
 | `network.egressIsolation.enabled` | `false` | egress隔離(opt-in)。app/workerはpublic可、他backendはintra+DNSのみ。postgresは除外 |

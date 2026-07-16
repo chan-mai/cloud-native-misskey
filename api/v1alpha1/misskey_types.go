@@ -624,6 +624,28 @@ type IngressSpec struct {
 	// TLSSecretName enables a TLS block referencing the named secret. Optional.
 	// +optional
 	TLSSecretName string `json:"tlsSecretName,omitempty"`
+
+	// IssuerRef points at a cert-manager Issuer/ClusterIssuer. The operator
+	// stamps the cert-manager annotation and a TLS block (secret "<name>-tls"
+	// unless tlsSecretName overrides it) so the certificate is provisioned
+	// automatically. Requires cert-manager in the cluster.
+	// +optional
+	IssuerRef *IngressIssuerRef `json:"issuerRef,omitempty"`
+}
+
+// IngressIssuerRef references a cert-manager issuer.
+type IngressIssuerRef struct {
+	// Name of the issuer.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+
+	// Kind of the issuer.
+	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
+	// +kubebuilder:default=ClusterIssuer
+	// +optional
+	Kind string `json:"kind,omitempty"`
 }
 
 // RedisSpec configures the Redis backend.

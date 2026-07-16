@@ -1130,6 +1130,35 @@ func TestBackupVerifyDue(t *testing.T) {
 	}
 }
 
+func TestIngressAnnotationsIssuerRef(t *testing.T) {
+	m := newMisskey()
+	// 既定: nginx body-sizeのみ
+	ann := ingressAnnotations(m, "nginx")
+	if ann["nginx.ingress.kubernetes.io/proxy-body-size"] != "0" || len(ann) != 1 {
+		t.Errorf("default annotations: %+v", ann)
+	}
+	// ClusterIssuer(既定kind)
+	m.Spec.Ingress.IssuerRef = &misskeyv1alpha1.IngressIssuerRef{Name: "letsencrypt"}
+	ann = ingressAnnotations(m, "nginx")
+	if ann["cert-manager.io/cluster-issuer"] != "letsencrypt" {
+		t.Errorf("cluster-issuer annotation: %+v", ann)
+	}
+	// namespaced Issuer
+	m.Spec.Ingress.IssuerRef.Kind = "Issuer"
+	ann = ingressAnnotations(m, "nginx")
+	if ann["cert-manager.io/issuer"] != "letsencrypt" {
+		t.Errorf("issuer annotation: %+v", ann)
+	}
+	if _, ok := ann["cert-manager.io/cluster-issuer"]; ok {
+		t.Errorf("both issuer annotations set: %+v", ann)
+	}
+	// ユーザannotationが優先
+	m.Spec.Ingress.Annotations = map[string]string{"cert-manager.io/issuer": "custom"}
+	if ann = ingressAnnotations(m, "nginx"); ann["cert-manager.io/issuer"] != "custom" {
+		t.Errorf("user annotation must win: %+v", ann)
+	}
+}
+
 func TestBuildScaledObjectRPS(t *testing.T) {
 	m := newMisskey()
 	a := &misskeyv1alpha1.AutoscalingSpec{

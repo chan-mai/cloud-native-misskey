@@ -29,10 +29,18 @@ import (
 
 // クラス固有の既定値とユーザのannotationをマージ(ユーザ優先)
 // nginxではproxy-body-sizeを引き上げる。既定1MBだとメディアアップロードが弾かれるため
+// issuerRef設定時はcert-managerのissuer annotationを注入
 func ingressAnnotations(m *misskeyv1alpha1.Misskey, className string) map[string]string {
 	out := map[string]string{}
 	if strings.Contains(className, "nginx") {
 		out["nginx.ingress.kubernetes.io/proxy-body-size"] = "0"
+	}
+	if ref := m.Spec.Ingress.IssuerRef; ref != nil {
+		key := "cert-manager.io/cluster-issuer"
+		if ref.Kind == "Issuer" {
+			key = "cert-manager.io/issuer"
+		}
+		out[key] = ref.Name
 	}
 	for k, v := range m.Spec.Ingress.Annotations {
 		out[k] = v
@@ -88,9 +96,10 @@ func (r *MisskeyReconciler) reconcileIngress(ctx context.Context, m *misskeyv1al
 				},
 			},
 		}
-		if m.Spec.Ingress.TLSSecretName != "" {
+		// issuerRef時はTLS blockを常設し、cert-managerに<name>-tlsへ証明書を払い出させる
+		if m.Spec.Ingress.TLSSecretName != "" || m.Spec.Ingress.IssuerRef != nil {
 			ing.Spec.TLS = []networkingv1.IngressTLS{
-				{Hosts: []string{p.ingressHost}, SecretName: m.Spec.Ingress.TLSSecretName},
+				{Hosts: []string{p.ingressHost}, SecretName: stringOr(m.Spec.Ingress.TLSSecretName, m.Name+"-tls")},
 			}
 		} else {
 			ing.Spec.TLS = nil
