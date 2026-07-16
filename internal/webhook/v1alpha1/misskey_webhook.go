@@ -115,6 +115,11 @@ func advisoryWarnings(m *misskeyv1alpha1.Misskey) admission.Warnings {
 	if pg.Recovery != nil || pg.Import != nil {
 		warns = append(warns, "spec.postgres.recovery/import restores an existing database: keep spec.url and spec.idGenerationMethod identical to the source instance, and use a postgres.imageName compatible with the source's PostgreSQL major version and installed extensions")
 	}
+	rpsSet := (m.Spec.App.Autoscaling != nil && m.Spec.App.Autoscaling.RPS != nil) ||
+		(m.Spec.Worker.Autoscaling != nil && m.Spec.Worker.Autoscaling.RPS != nil)
+	if rpsSet && (m.Spec.Monitoring.Enabled == nil || !*m.Spec.Monitoring.Enabled) {
+		warns = append(warns, "autoscaling.rps needs monitoring.enabled so the proxy metrics port is exposed and scraped")
+	}
 	if os := m.Spec.ObjectStorage; os != nil {
 		if os.SetPublicRead != nil && *os.SetPublicRead && strings.Contains(os.Endpoint, "r2.cloudflarestorage.com") {
 			warns = append(warns, "spec.objectStorage.setPublicRead must be false for Cloudflare R2 (it does not support object ACLs)")

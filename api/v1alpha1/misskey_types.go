@@ -496,6 +496,32 @@ type AutoscalingSpec struct {
 	// worker; typically deliver and inbox.
 	// +optional
 	Queues []QueueScaleTrigger `json:"queues,omitempty"`
+
+	// RPS, when set, switches the mechanism to a KEDA ScaledObject that scales
+	// on the proxy's request rate via a prometheus trigger. Intended for the
+	// app component; requires KEDA and monitoring.enabled (or an equivalent
+	// scrape) so the Caddy metrics are collected.
+	// +optional
+	RPS *RPSTrigger `json:"rps,omitempty"`
+}
+
+// RPSTrigger scales on the proxy's request rate from Prometheus.
+type RPSTrigger struct {
+	// ServerAddress is the Prometheus endpoint KEDA queries, e.g.
+	// http://prometheus.monitoring:9090.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2048
+	ServerAddress string `json:"serverAddress"`
+
+	// TargetRPS is the request rate each replica should absorb.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	TargetRPS int32 `json:"targetRPS"`
+
+	// Query overrides the default PromQL (this instance's total proxy RPS).
+	// +optional
+	Query string `json:"query,omitempty"`
 }
 
 // QueueScaleTrigger scales on the wait-list depth of one BullMQ queue.

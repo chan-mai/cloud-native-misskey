@@ -1130,6 +1130,51 @@ func TestBackupVerifyDue(t *testing.T) {
 	}
 }
 
+func TestBuildScaledObjectRPS(t *testing.T) {
+	m := newMisskey()
+	a := &misskeyv1alpha1.AutoscalingSpec{
+		MaxReplicas: 5,
+		RPS:         &misskeyv1alpha1.RPSTrigger{ServerAddress: "http://prom:9090", TargetRPS: 50},
+	}
+	if !autoscalingUsesKEDA(a) {
+		t.Fatal("rps指定はKEDA経路になるべき")
+	}
+	so := buildScaledObject(m, roleApp, nameApp(m), a, redisEndpoint{})
+	triggers := so.Object["spec"].(map[string]any)["triggers"].([]any)
+	if len(triggers) != 1 {
+		t.Fatalf("expected 1 trigger, got %d: %+v", len(triggers), triggers)
+	}
+	trig := triggers[0].(map[string]any)
+	if trig["type"] != "prometheus" {
+		t.Errorf("trigger type: %v", trig["type"])
+	}
+	meta := trig["metadata"].(map[string]any)
+	if meta["serverAddress"] != "http://prom:9090" || meta["threshold"] != "50" {
+		t.Errorf("trigger metadata: %+v", meta)
+	}
+	// 既定queryは自インスタンスのproxyに限定
+	if q := meta["query"].(string); !strings.Contains(q, `service="example-proxy"`) || !strings.Contains(q, `namespace="ns"`) {
+		t.Errorf("default query: %s", q)
+	}
+	if _, ok := trig["authenticationRef"]; ok {
+		t.Error("rps triggerにredis authenticationRefが付いた")
+	}
+
+	// query上書き + cpu floor併存
+	a.RPS.Query = "sum(custom_metric)"
+	a.TargetCPUUtilizationPercentage = int32Ptr(70)
+	triggers = buildScaledObject(m, roleApp, nameApp(m), a, redisEndpoint{}).Object["spec"].(map[string]any)["triggers"].([]any)
+	if len(triggers) != 2 {
+		t.Fatalf("expected prometheus+cpu triggers: %+v", triggers)
+	}
+	if q := triggers[0].(map[string]any)["metadata"].(map[string]any)["query"]; q != "sum(custom_metric)" {
+		t.Errorf("query override: %v", q)
+	}
+	if triggers[1].(map[string]any)["type"] != "cpu" {
+		t.Errorf("cpu floor missing: %+v", triggers[1])
+	}
+}
+
 func TestBuildPrometheusRule(t *testing.T) {
 	m := newMisskey()
 	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{DestinationPath: "s3://bk/misskey"}

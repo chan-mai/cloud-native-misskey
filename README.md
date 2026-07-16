@@ -298,7 +298,24 @@ spec:
 
 - 監視Redisキーは`<url host>:queue:<queue>:<queue>:wait`を自動算出します。プレフィックスが異なる場合は`queues[].listName`で上書きできます。
 - HA redis(Sentinel+auth)の場合、operatorがsentinel/passwordのTriggerAuthenticationを自動生成します。
-- RPSベースのappスケールは将来対応(Prometheus + KEDA prometheus trigger)。現状はCPU/memoryのみです。
+
+### app: RPSベース (`autoscaling.rps`)
+
+前段proxyのリクエストレートでappをスケールします(KEDA prometheus trigger)。`monitoring.enabled`でCaddyメトリクスがscrapeされていることが前提です(未設定なら警告)。
+
+```yaml
+spec:
+  monitoring: { enabled: true }
+  app:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 10
+      rps:
+        serverAddress: http://prometheus-operated.monitoring:9090
+        targetRPS: 50   # 1レプリカあたりの目標RPS
+        # query: 独自PromQLで上書き可(既定は自インスタンスのproxy合計RPS)
+      targetCPUUtilizationPercentage: 80  # 任意, cpu floorとして併存
+```
 
 ## オブジェクトストレージ(media)
 
@@ -408,7 +425,7 @@ make test-e2e    # kind e2e
 - 外部operatorのCRD(CNPGの`Cluster`/`Pooler`、redis-operatorの`RedisReplication`/`RedisSentinel`、KEDAの`ScaledObject`)はServer-Side Applyで管理しますが、watchはしていません。これらを外部から直接削除・改変した場合の是正は、reconcile成功後に定期requeue(既定3分、`--drift-resync-interval`で調整)でSSAを再適用して行います。よってドリフトは最大その間隔で自動是正されます(Deployment/NetworkPolicy/PDB等のnative resourceはOwns()でwatch・即時是正)。
 - migration Jobが失敗し切った場合(BackoffLimit超過)、DB接続先やmigrationフラグ等のspec変更時は自動で作り直されます。同一設定のまま再試行するには`kubectl delete job <name>-migrate-<hash>`で削除すると、次のreconcileで再生成されます(同一入力の失敗を無限リトライしないのは、`createIndexConcurrently`失敗時のinvalid index堆積等を避けるためです)。
 - `Ready`/`Phase`はDB/Redis/MeiliSearch/migration/app/worker/proxy/Ingressの全conditionsの集約です。managed Redis/MeiliSearchはSTS(HAはpod)のready数、externalは常にTrueとして扱います。
-- appのオートスケールはCPU/memory(native HPA)のみです。RPSベース(Prometheus + KEDA prometheus trigger)は将来対応です。
+- appのオートスケールはCPU/memory(native HPA)に加え、`autoscaling.rps`でRPSベース(KEDA prometheus trigger)を選べます。rps指定時はKEDA経路になりmemory targetは効きません。
 - immutable検証(`url`/`idGenerationMethod`/`tenant`/`postgres.recovery`)とcross-field整合(managed/external排他、pooler/backup/recoveryのmanaged必須、recoveryとbackupのWALアーカイブ衝突防止、autoscaling min<=max、redis role排他)はCRDのCEL(`x-kubernetes-validations`)で**常時**強制します。APIサーバが直接弾くため、webhook未導入でも効きます。
 - webhook(`config/default-webhook`、cert-manager必須、opt-in)はCELで表せない補助のみを担います: `tenant`未設定→namespace確定のdefaulting(「未設定→初回設定」の穴塞ぎ)と、エラーにしない警告(external DBで`readOffload`無効、等)。cert-manager無しなら`config/default`(webhook無し)を使います。manager側は`ENABLE_WEBHOOKS=false`が設定済みで、`config/default-webhook`のpatchが`true`へ上書きします。webhook無しの場合`tenant`は生成時に明示してください(defaultingが効かないため)。
 - egress隔離は`spec.network.egressIsolation.enabled`でopt-inです(既定off)。有効時、app/workerはDNS+intra-instance+public(RFC1918/CGNAT/link-local除く)、他backendはDNS+intra-instanceのみに制限し、SSRF/横移動を抑止します。app/workerは連合のため外向きpublicは開けるので、目的は外向き遮断ではなく内部到達の遮断です。DNS namespaceは`network.egressIsolation.dnsNamespace`(既定`kube-system`)で指定します。public許可ルールはIPv4のみ対応で、dual-stackクラスタではIPv6のegressは遮断されます(IPv6で連合する場合は注意)。

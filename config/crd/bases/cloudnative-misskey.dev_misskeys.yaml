@@ -120,6 +120,34 @@ spec:
                           - name
                           type: object
                         type: array
+                      rps:
+                        description: |-
+                          RPS, when set, switches the mechanism to a KEDA ScaledObject that scales
+                          on the proxy's request rate via a prometheus trigger. Intended for the
+                          app component; requires KEDA and monitoring.enabled (or an equivalent
+                          scrape) so the Caddy metrics are collected.
+                        properties:
+                          query:
+                            description: Query overrides the default PromQL (this
+                              instance's total proxy RPS).
+                            type: string
+                          serverAddress:
+                            description: |-
+                              ServerAddress is the Prometheus endpoint KEDA queries, e.g.
+                              http://prometheus.monitoring:9090.
+                            maxLength: 2048
+                            minLength: 1
+                            type: string
+                          targetRPS:
+                            description: TargetRPS is the request rate each replica
+                              should absorb.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                        required:
+                        - serverAddress
+                        - targetRPS
+                        type: object
                       targetCPUUtilizationPercentage:
                         description: TargetCPUUtilizationPercentage adds a CPU utilization
                           metric. Unset omits it.
@@ -2820,6 +2848,34 @@ spec:
                           - name
                           type: object
                         type: array
+                      rps:
+                        description: |-
+                          RPS, when set, switches the mechanism to a KEDA ScaledObject that scales
+                          on the proxy's request rate via a prometheus trigger. Intended for the
+                          app component; requires KEDA and monitoring.enabled (or an equivalent
+                          scrape) so the Caddy metrics are collected.
+                        properties:
+                          query:
+                            description: Query overrides the default PromQL (this
+                              instance's total proxy RPS).
+                            type: string
+                          serverAddress:
+                            description: |-
+                              ServerAddress is the Prometheus endpoint KEDA queries, e.g.
+                              http://prometheus.monitoring:9090.
+                            maxLength: 2048
+                            minLength: 1
+                            type: string
+                          targetRPS:
+                            description: TargetRPS is the request rate each replica
+                              should absorb.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                        required:
+                        - serverAddress
+                        - targetRPS
+                        type: object
                       targetCPUUtilizationPercentage:
                         description: TargetCPUUtilizationPercentage adds a CPU utilization
                           metric. Unset omits it.

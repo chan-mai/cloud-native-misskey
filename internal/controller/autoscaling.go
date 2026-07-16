@@ -43,9 +43,9 @@ func autoscalingEnabled(a *misskeyv1alpha1.AutoscalingSpec) bool {
 	return a != nil
 }
 
-// autoscalingUsesKEDA: queue trigger指定でKEDA、なければnative HPA
+// autoscalingUsesKEDA: queue/rps trigger指定でKEDA、なければnative HPA
 func autoscalingUsesKEDA(a *misskeyv1alpha1.AutoscalingSpec) bool {
-	return len(a.Queues) > 0
+	return len(a.Queues) > 0 || a.RPS != nil
 }
 
 // nameTriggerAuth: KEDA TriggerAuthentication名(redis認証用, managed/external問わず)
@@ -115,9 +115,10 @@ func resourceUtilMetric(name corev1.ResourceName, target int32) autoscalingv2.Me
 }
 
 // reconcileScaledObject: KEDA ScaledObject(+redis認証時TriggerAuthentication)をapply
+// TriggerAuthはqueue triggerが参照する時のみ(rps単独では不要)
 func (r *MisskeyReconciler) reconcileScaledObject(ctx context.Context, m *misskeyv1alpha1.Misskey, component, targetName string, a *misskeyv1alpha1.AutoscalingSpec, p plan) error {
 	ep := jobQueueEndpoint(p)
-	if ep.passSel != nil {
+	if ep.passSel != nil && len(a.Queues) > 0 {
 		if err := r.applySSA(ctx, m, buildTriggerAuth(m, targetName, ep)); err != nil {
 			return err
 		}
@@ -140,6 +141,12 @@ func jobQueueEndpoint(p plan) redisEndpoint {
 // BullMQは `<prefix>:<name>:<type>` でキー生成のため queue名が2回現れる: <host>:queue:<queue>:<queue>:wait
 func redisQueueListName(m *misskeyv1alpha1.Misskey, queue string) string {
 	return fmt.Sprintf("%s:queue:%s:%s:wait", hostFromURL(m.Spec.URL), queue, queue)
+}
+
+// defaultRPSQuery: 自インスタンスのproxy(Caddy)合計RPS
+// ServiceMonitorはrelabelingなしのためnamespace/serviceラベルで自インスタンスに限定
+func defaultRPSQuery(m *misskeyv1alpha1.Misskey) string {
+	return fmt.Sprintf(`sum(rate(caddy_http_request_duration_seconds_count{namespace=%q,service=%q}[2m]))`, m.Namespace, nameProxy(m))
 }
 
 // buildScaledObject: KEDA ScaledObject unstructured。各queueをredis/redis-sentinel triggerに
@@ -172,6 +179,17 @@ func buildScaledObject(m *misskeyv1alpha1.Misskey, component, targetName string,
 			trig["authenticationRef"] = map[string]any{"name": nameTriggerAuth(targetName)}
 		}
 		triggers = append(triggers, trig)
+	}
+	// RPS trigger(任意): 前段proxyのリクエストレートでスケール
+	if rps := a.RPS; rps != nil {
+		triggers = append(triggers, map[string]any{
+			"type": "prometheus",
+			"metadata": map[string]any{
+				"serverAddress": rps.ServerAddress,
+				"query":         stringOr(rps.Query, defaultRPSQuery(m)),
+				"threshold":     strconv.Itoa(int(rps.TargetRPS)),
+			},
+		})
 	}
 	// cpu floor(任意)
 	if a.TargetCPUUtilizationPercentage != nil {

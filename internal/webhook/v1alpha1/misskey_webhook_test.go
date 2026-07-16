@@ -82,6 +82,21 @@ func TestAdvisoryWarnings(t *testing.T) {
 	if len(warns) == 0 || !strings.Contains(strings.Join(warns, " "), "recovery") {
 		t.Errorf("expected recovery advisory warning, got %v", warns)
 	}
+	// rps + monitoring無効 → 警告
+	m3 := base()
+	m3.Spec.App.Autoscaling = &misskeyv1alpha1.AutoscalingSpec{
+		MaxReplicas: 3,
+		RPS:         &misskeyv1alpha1.RPSTrigger{ServerAddress: "http://prom:9090", TargetRPS: 50},
+	}
+	warns = advisoryWarnings(m3)
+	if len(warns) == 0 || !strings.Contains(strings.Join(warns, " "), "monitoring.enabled") {
+		t.Errorf("expected rps monitoring warning, got %v", warns)
+	}
+	m3.Spec.Monitoring.Enabled = &on
+	if w := advisoryWarnings(m3); len(w) != 0 {
+		t.Errorf("rps with monitoring must not warn: %v", w)
+	}
+
 	// 正常specは警告なし
 	if w := advisoryWarnings(base()); len(w) != 0 {
 		t.Errorf("clean spec must have no warnings: %v", w)
