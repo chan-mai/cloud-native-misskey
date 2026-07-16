@@ -106,7 +106,7 @@ func TestAdvisoryWarnings(t *testing.T) {
 		}
 		m4.Spec.TrackImageDigest = true
 		if w := advisoryWarnings(m4); len(w) != 0 {
-			t.Errorf("trackImageDigest有効なら警告なし: %v", w)
+			t.Errorf("trackImageDigest enabled must not warn: %v", w)
 		}
 	}
 

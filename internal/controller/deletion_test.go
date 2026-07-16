@@ -78,10 +78,10 @@ func TestReconcileDeleteRetainOrphans(t *testing.T) {
 	}
 	got := &corev1.Secret{}
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: nameMeili(m), Namespace: m.Namespace}, got); err != nil {
-		t.Fatalf("retain時にsecretが消えた: %v", err)
+		t.Fatalf("secret deleted despite Retain: %v", err)
 	}
 	if len(got.OwnerReferences) != 0 {
-		t.Errorf("ownerRefがorphan化されていない: %v", got.OwnerReferences)
+		t.Errorf("ownerRef not orphaned: %v", got.OwnerReferences)
 	}
 }
 
@@ -100,6 +100,6 @@ func TestReconcileDeleteDeleteKeepsOwnerRef(t *testing.T) {
 		t.Fatalf("secret get: %v", err)
 	}
 	if len(got.OwnerReferences) != 1 {
-		t.Errorf("Delete方針でownerRefを外してはいけない: %v", got.OwnerReferences)
+		t.Errorf("Delete policy must not remove ownerRef: %v", got.OwnerReferences)
 	}
 }

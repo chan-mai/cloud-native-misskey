@@ -51,10 +51,10 @@ func TestResumeReplicas(t *testing.T) {
 		want *int32
 	}{
 		{"static", misskeyv1alpha1.ComponentSpec{Replicas: int32Ptr(3)}, existing(0), int32Ptr(3)},
-		{"autoscaling+新規", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, &appsv1.Deployment{}, nil},
-		{"autoscaling+稼働中", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(2), nil},
-		{"autoscaling+suspend明け", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(0), int32Ptr(1)},
-		{"autoscaling+suspend明け+minReplicas", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(int32Ptr(2))}, existing(0), int32Ptr(2)},
+		{"autoscaling+new", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, &appsv1.Deployment{}, nil},
+		{"autoscaling+running", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(2), nil},
+		{"autoscaling+after suspend", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(0), int32Ptr(1)},
+		{"autoscaling+after suspend+minReplicas", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(int32Ptr(2))}, existing(0), int32Ptr(2)},
 	}
 	for _, tc := range cases {
 		got := resumeReplicas(tc.comp, tc.dep)
@@ -611,7 +611,7 @@ func TestLabelsForTenant(t *testing.T) {
 	}
 	// selectorForにtenantを含めない(不変selector維持)
 	if _, ok := selectorFor(m, roleApp)[key]; ok {
-		t.Error("selectorForにtenantが混入している")
+		t.Error("tenant leaked into selectorFor")
 	}
 }
 
@@ -701,13 +701,13 @@ func TestBuildPodSpecRuntime(t *testing.T) {
 		t.Errorf("default command: %v", c.Command)
 	}
 	if !hasMount(c.VolumeMounts, "/misskey/.config/default.yml") {
-		t.Error("config mount欠落")
+		t.Error("config mount missing")
 	}
 	if !hasMount(c.VolumeMounts, "/misskey/built") {
-		t.Error("built mount欠落")
+		t.Error("built mount missing")
 	}
 	if !hasContainer(spec.InitContainers, "prepare-built") {
-		t.Error("prepare-built init欠落")
+		t.Error("prepare-built init missing")
 	}
 
 	// builtPath="" → built mount/prepare-built無し
@@ -715,10 +715,10 @@ func TestBuildPodSpecRuntime(t *testing.T) {
 	m.Spec.Runtime.BuiltPath = &empty
 	spec = buildMisskeyPodSpec(m, p, roleApp, m.Spec.App)
 	if hasMount(spec.Containers[0].VolumeMounts, "/misskey/built") {
-		t.Error("builtPath=空でbuilt mountが残っている")
+		t.Error("built mount remains with empty builtPath")
 	}
 	if hasContainer(spec.InitContainers, "prepare-built") {
-		t.Error("builtPath=空でprepare-buildが残っている")
+		t.Error("prepare-built remains with empty builtPath")
 	}
 }
 
@@ -1042,7 +1042,7 @@ func TestBuildPreMigrationBackup(t *testing.T) {
 	m2 := newMisskey()
 	m2.Spec.Image = "misskey/misskey:other"
 	if namePreBackup(m2) == namePreBackup(m) {
-		t.Error("image変更でpre-backup名が変わらない")
+		t.Error("pre-backup name unchanged after image change")
 	}
 }
 
@@ -1055,8 +1055,8 @@ func TestPreMigrationBackupGate(t *testing.T) {
 		m    *misskeyv1alpha1.Misskey
 		p    plan
 	}{
-		{"preBackup無効", newMisskey(), plan{dbManaged: true}},
-		{"backup未設定", func() *misskeyv1alpha1.Misskey {
+		{"preBackup disabled", newMisskey(), plan{dbManaged: true}},
+		{"backup unset", func() *misskeyv1alpha1.Misskey {
 			m := newMisskey()
 			m.Spec.Migration.PreBackup = boolPtr(true)
 			return m
@@ -1121,14 +1121,14 @@ func TestBackupVerifyDue(t *testing.T) {
 	now := metav1.Now()
 	m := newMisskey()
 	if !backupVerifyDue(m, time.Hour, now.Time) {
-		t.Error("初回は即due")
+		t.Error("first run should be immediately due")
 	}
 	m.Status.BackupVerification = &misskeyv1alpha1.BackupVerificationStatus{LastVerifiedTime: now}
 	if backupVerifyDue(m, time.Hour, now.Add(30*time.Minute)) {
-		t.Error("interval未満でdueになった")
+		t.Error("due before interval elapsed")
 	}
 	if !backupVerifyDue(m, time.Hour, now.Add(2*time.Hour)) {
-		t.Error("interval超過でdueにならない")
+		t.Error("not due after interval elapsed")
 	}
 }
 
@@ -1179,7 +1179,7 @@ func TestDigestResolverPinned(t *testing.T) {
 		t.Errorf("pinned: %v", got)
 	}
 	if _, _ = dr.Pinned(ctx, "img:latest", nil); calls != 1 {
-		t.Errorf("TTL内はcacheを使うべき: calls=%d", calls)
+		t.Errorf("cache should be used within TTL: calls=%d", calls)
 	}
 	// TTL切れで再解決
 	dr.cache["img:latest"] = digestEntry{digest: "sha256:aaa", resolvedAt: time.Now().Add(-time.Hour)}
@@ -1187,7 +1187,7 @@ func TestDigestResolverPinned(t *testing.T) {
 		return "sha256:bbb", nil
 	}
 	if got, _ := dr.Pinned(ctx, "img:latest", nil); got != "img:latest@sha256:bbb" {
-		t.Errorf("TTL切れ再解決: %v", got)
+		t.Errorf("re-resolve after TTL expiry: %v", got)
 	}
 	// 失敗時はstale cacheへfallback
 	dr.cache["img:latest"] = digestEntry{digest: "sha256:bbb", resolvedAt: time.Now().Add(-time.Hour)}
@@ -1199,7 +1199,7 @@ func TestDigestResolverPinned(t *testing.T) {
 	}
 	// cache無しの失敗はエラー
 	if _, err := dr.Pinned(ctx, "other:latest", nil); err == nil {
-		t.Error("cache無しの失敗はエラーになるべき")
+		t.Error("failure without cache should be an error")
 	}
 }
 
@@ -1235,7 +1235,7 @@ func TestResolveImageTrackDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m2.Spec.Image != "misskey/misskey:latest@sha256:old" {
-		t.Errorf("status pin継続: %s", m2.Spec.Image)
+		t.Errorf("status pin should persist: %s", m2.Spec.Image)
 	}
 
 	// statusにも無い初回失敗はエラー
@@ -1243,14 +1243,14 @@ func TestResolveImageTrackDigest(t *testing.T) {
 	m3.Spec.Image = "misskey/misskey:latest"
 	m3.Spec.TrackImageDigest = true
 	if err := r2.resolveImage(ctx, m3); err == nil {
-		t.Error("初回解決失敗はエラーになるべき")
+		t.Error("first-time resolution failure should be an error")
 	}
 
 	// 追従off/digest指定済みは無変換
 	m4 := newMisskey()
 	m4.Spec.Image = "misskey/misskey:2026.6.0"
 	if err := r2.resolveImage(ctx, m4); err != nil || m4.Spec.Image != "misskey/misskey:2026.6.0" {
-		t.Errorf("追従offは無変換: %s %v", m4.Spec.Image, err)
+		t.Errorf("tracking off should leave image unchanged: %s %v", m4.Spec.Image, err)
 	}
 }
 
@@ -1335,7 +1335,7 @@ func TestBuildScaledObjectRPS(t *testing.T) {
 		RPS:         &misskeyv1alpha1.RPSTrigger{ServerAddress: "http://prom:9090", TargetRPS: 50},
 	}
 	if !autoscalingUsesKEDA(a) {
-		t.Fatal("rps指定はKEDA経路になるべき")
+		t.Fatal("rps setting should take the KEDA path")
 	}
 	so := buildScaledObject(m, roleApp, nameApp(m), a, redisEndpoint{})
 	triggers := so.Object["spec"].(map[string]any)["triggers"].([]any)
@@ -1355,7 +1355,7 @@ func TestBuildScaledObjectRPS(t *testing.T) {
 		t.Errorf("default query: %s", q)
 	}
 	if _, ok := trig["authenticationRef"]; ok {
-		t.Error("rps triggerにredis authenticationRefが付いた")
+		t.Error("redis authenticationRef attached to rps trigger")
 	}
 
 	// query上書き + cpu floor併存
@@ -1432,12 +1432,12 @@ func TestBuildDBScheduledBackup(t *testing.T) {
 func TestPoolerHelpers(t *testing.T) {
 	m := newMisskey()
 	if poolerEnabled(m) {
-		t.Error("pooler未指定はdisabled")
+		t.Error("pooler unset should be disabled")
 	}
 	// ポインタ存在=有効(内側Enabledは廃止)
 	m.Spec.Postgres.Pooler = &misskeyv1alpha1.PostgresPooler{}
 	if !poolerEnabled(m) {
-		t.Error("pooler block存在でenabled")
+		t.Error("pooler block present should be enabled")
 	}
 }
 

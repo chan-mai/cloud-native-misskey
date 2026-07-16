@@ -170,11 +170,11 @@ func TestE2E(t *testing.T) {
 	}
 
 	// 実DBへの実migration完了(CNPG provisioning込み)
-	waitFor("migration Job成功", 12*time.Minute, jobSucceeded("migrate"))
+	waitFor("migration Job succeeded", 12*time.Minute, jobSucceeded("migrate"))
 
 	// meta書込Jobが実CNPGへUPDATE metaを実行して成功すること
 	// (psql/\getenv/INSERT ON CONFLICT+UPDATEの実挙動検証。unit/envtestでは不可)
-	waitFor("object storage meta Job成功", 5*time.Minute, jobSucceeded("objstorage"))
+	waitFor("object storage meta Job succeeded", 5*time.Minute, jobSucceeded("objstorage"))
 
 	// 全subsystem Ready(app/worker実起動、probe通過)
 	waitFor("Ready=True", 12*time.Minute, func(ctx context.Context) (bool, error) {
@@ -203,22 +203,22 @@ func TestE2E(t *testing.T) {
 	// (Ready到達自体がpassword一致のend-to-end証明。加えてsecret/STS commandを明示検証)
 	authSec := &corev1.Secret{}
 	if err := cl.Get(ctx, types.NamespacedName{Name: name + "-redis-auth", Namespace: ns}, authSec); err != nil {
-		t.Errorf("redis auth secret未生成: %v", err)
+		t.Errorf("redis auth secret not created: %v", err)
 	} else if len(authSec.Data["password"]) == 0 {
-		t.Error("redis auth secretにpasswordが無い")
+		t.Error("redis auth secret has no password")
 	}
 	redisSTS := &appsv1.StatefulSet{}
 	if err := cl.Get(ctx, types.NamespacedName{Name: name + "-redis", Namespace: ns}, redisSTS); err != nil {
-		t.Errorf("redis STS取得: %v", err)
+		t.Errorf("get redis STS: %v", err)
 	} else if cmd := redisSTS.Spec.Template.Spec.Containers[0].Command; len(cmd) != 3 || !strings.Contains(cmd[2], "--requirepass") {
-		t.Errorf("redis STS requirepass無し: %+v", cmd)
+		t.Errorf("redis STS missing requirepass: %+v", cmd)
 	}
 
 	// 削除→finalizer→子リソースGC
 	if err := cl.Delete(ctx, cur); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	waitFor("CR削除完了", 3*time.Minute, func(ctx context.Context) (bool, error) {
+	waitFor("CR deleted", 3*time.Minute, func(ctx context.Context) (bool, error) {
 		err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &misskeyv1alpha1.Misskey{})
 		return apierrors.IsNotFound(err), nil
 	})

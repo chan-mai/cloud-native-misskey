@@ -50,7 +50,7 @@ import (
 func setupEnvtest(t *testing.T) (context.Context, client.Client, *runtime.Scheme) {
 	t.Helper()
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
-		t.Skip("KUBEBUILDER_ASSETS未設定のためenvtestをskip(make envtestで用意)")
+		t.Skip("skipping envtest: KUBEBUILDER_ASSETS not set (run make envtest)")
 	}
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
@@ -135,23 +135,23 @@ func TestReconcileIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !controllerutil.ContainsFinalizer(cur, misskeyFinalizer) {
-		t.Error("finalizerが付与されていない")
+		t.Error("finalizer not added")
 	}
 
 	// 生成物: config / app Service / migration Job / 隔離NP
 	if !exists(ctx, cl, &corev1.ConfigMap{}, nameConfig(m), ns) {
-		t.Error("config ConfigMap未生成")
+		t.Error("config ConfigMap not created")
 	}
 	if !exists(ctx, cl, &corev1.Service{}, nameApp(m), ns) {
-		t.Error("app Service未生成")
+		t.Error("app Service not created")
 	}
 	if !exists(ctx, cl, &batchv1.Job{}, nameMigrate(m), ns) {
-		t.Error("migration Job未生成")
+		t.Error("migration Job not created")
 	}
 
 	// migration未完了→app Deployment未生成(gate)
 	if exists(ctx, cl, &appsv1.Deployment{}, nameApp(m), ns) {
-		t.Error("migration未完了なのにapp Deploymentが生成された")
+		t.Error("app Deployment created before migration completed")
 	}
 
 	// status: external DBはDatabaseReady=True、MigrationComplete=False
@@ -167,7 +167,7 @@ func TestReconcileIntegration(t *testing.T) {
 	}
 	for _, c := range cur.Status.Conditions {
 		if c.Type == "SearchReady" {
-			t.Errorf("sqlLikeでSearchReadyが存在: %+v", c)
+			t.Errorf("SearchReady exists with sqlLike: %+v", c)
 		}
 	}
 
@@ -195,10 +195,10 @@ func TestReconcileIntegration(t *testing.T) {
 		reconcile()
 	}
 	if !exists(ctx, cl, &appsv1.Deployment{}, nameApp(m), ns) {
-		t.Error("migration完了後もapp Deployment未生成")
+		t.Error("app Deployment not created after migration completed")
 	}
 	if !exists(ctx, cl, &appsv1.Deployment{}, nameWorker(m), ns) {
-		t.Error("migration完了後もworker Deployment未生成")
+		t.Error("worker Deployment not created after migration completed")
 	}
 
 	// 削除→finalizer処理→消滅
@@ -209,7 +209,7 @@ func TestReconcileIntegration(t *testing.T) {
 		reconcile()
 	}
 	if err := cl.Get(ctx, req.NamespacedName, &misskeyv1alpha1.Misskey{}); !apierrors.IsNotFound(err) {
-		t.Errorf("削除後もMisskeyが残存: %v", err)
+		t.Errorf("Misskey still exists after delete: %v", err)
 	}
 }
 
@@ -292,20 +292,20 @@ func TestSuspendResume(t *testing.T) {
 		reconcile()
 	}
 	if !exists(ctx, cl, &appsv1.Deployment{}, nameApp(m), ns) || !exists(ctx, cl, &appsv1.Deployment{}, nameWorker(m), ns) {
-		t.Fatal("app/worker Deployment未生成")
+		t.Fatal("app/worker Deployment not created")
 	}
 	if !exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
-		t.Fatal("app HPA未生成")
+		t.Fatal("app HPA not created")
 	}
 
 	// suspend → replicas 0・HPA削除・Phase=Suspended
 	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Suspend = true })
 	reconcile()
 	if got := appReplicas(); got != 0 {
-		t.Errorf("suspend後のapp replicas=%d, want 0", got)
+		t.Errorf("app replicas=%d after suspend, want 0", got)
 	}
 	if exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
-		t.Error("suspend後もHPAが残存")
+		t.Error("HPA still exists after suspend")
 	}
 	cur := &misskeyv1alpha1.Misskey{}
 	if err := cl.Get(ctx, req.NamespacedName, cur); err != nil {
@@ -325,7 +325,7 @@ func TestSuspendResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exists(ctx, cl, &batchv1.Job{}, nameMigrate(cur), ns) {
-		t.Error("suspend中に新migration Jobが生成された")
+		t.Error("new migration Job created while suspended")
 	}
 
 	// resume → 新migration完了後にapp replicasがminReplicas(既定1)で再点火
@@ -336,10 +336,10 @@ func TestSuspendResume(t *testing.T) {
 		reconcile()
 	}
 	if got := appReplicas(); got != 1 {
-		t.Errorf("resume後のapp replicas=%d, want 1", got)
+		t.Errorf("app replicas=%d after resume, want 1", got)
 	}
 	if !exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
-		t.Error("resume後もHPA未生成")
+		t.Error("HPA not created after resume")
 	}
 }
 
@@ -394,7 +394,7 @@ func TestChannelResolveNoPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cur.Spec.Image != "" {
-		t.Errorf("spec.imageがpersistされた: %q", cur.Spec.Image)
+		t.Errorf("spec.image was persisted: %q", cur.Spec.Image)
 	}
 	// 解決値はstatusとmigration Job名に現れる
 	if cur.Status.Image != "misskey/misskey:v1" {
@@ -403,7 +403,7 @@ func TestChannelResolveNoPersist(t *testing.T) {
 	resolved := cur.DeepCopy()
 	resolved.Spec.Image = "misskey/misskey:v1"
 	if !exists(ctx, cl, &batchv1.Job{}, nameMigrate(resolved), ns) {
-		t.Error("解決済みimageのmigration Job未生成")
+		t.Error("migration Job for resolved image not created")
 	}
 	// channel側の集計
 	if _, err := cr.Reconcile(ctx, chReq); err != nil {
@@ -414,7 +414,7 @@ func TestChannelResolveNoPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if curCh.Status.Instances != 1 || curCh.Status.UpdatedInstances != 1 {
-		t.Errorf("channel集計: %+v", curCh.Status)
+		t.Errorf("channel aggregation: %+v", curCh.Status)
 	}
 }
 
@@ -439,7 +439,7 @@ func TestChannelStagedRollout(t *testing.T) {
 		}
 	}
 	if early == "" || late == "" {
-		t.Fatal("bucketが50を跨ぐ名前を発見できず")
+		t.Fatal("could not find names whose buckets straddle 50")
 	}
 
 	ch := &misskeyv1alpha1.MisskeyChannel{
@@ -492,7 +492,7 @@ func TestChannelStagedRollout(t *testing.T) {
 
 	// 初期状態: 両方v1
 	if a, b := statusImage(reqEarly), statusImage(reqLate); a != "misskey/misskey:v1" || b != "misskey/misskey:v1" {
-		t.Fatalf("初期image: %s / %s", a, b)
+		t.Fatalf("initial image: %s / %s", a, b)
 	}
 
 	// image更新→ロールアウト開始。第1バッチ(bucket<50)のみv2
@@ -549,7 +549,7 @@ func TestChannelDigestTracking(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cur.Status.Image != "misskey/misskey:latest@sha256:d1" {
-		t.Fatalf("初回pin: %s", cur.Status.Image)
+		t.Fatalf("initial pin: %s", cur.Status.Image)
 	}
 
 	// 同一タグでdigestだけ変化 → previousImageが立ちロールアウト開始
@@ -566,10 +566,10 @@ func TestChannelDigestTracking(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cur.Status.Image != "misskey/misskey:latest@sha256:d2" || cur.Status.PreviousImage != "misskey/misskey:latest@sha256:d1" {
-		t.Errorf("digest変更でロールアウトが始まっていない: %+v", cur.Status)
+		t.Errorf("rollout not started on digest change: %+v", cur.Status)
 	}
 	if cur.Status.ImageChangedAt.IsZero() {
-		t.Error("imageChangedAt未設定")
+		t.Error("imageChangedAt not set")
 	}
 
 	// 解決失敗時はstatus維持(rollout状態を壊さない)
@@ -584,13 +584,13 @@ func TestChannelDigestTracking(t *testing.T) {
 		t.Fatalf("channel reconcile: %v", err)
 	}
 	if res.RequeueAfter != time.Minute {
-		t.Errorf("解決失敗時は短いrequeue: %v", res.RequeueAfter)
+		t.Errorf("expected short requeue on resolve failure: %v", res.RequeueAfter)
 	}
 	if err := cl.Get(ctx, chReq.NamespacedName, cur); err != nil {
 		t.Fatal(err)
 	}
 	if cur.Status.Image != "misskey/misskey:latest@sha256:d2" {
-		t.Errorf("解決失敗でstatusが壊れた: %s", cur.Status.Image)
+		t.Errorf("status broken by resolve failure: %s", cur.Status.Image)
 	}
 }
 
@@ -669,31 +669,31 @@ func TestOptOutCleanup(t *testing.T) {
 		"proxy PDB":        &policyv1.PodDisruptionBudget{},
 	} {
 		if !exists(ctx, cl, obj, nameProxy(m), ns) {
-			t.Errorf("%s未生成", name)
+			t.Errorf("%s not created", name)
 		}
 	}
 	// 統合後はmaintenance Deployment/Serviceを作らず、legacy残骸も掃除される
 	if exists(ctx, cl, &appsv1.Deployment{}, nameMaintenance(m), ns) {
-		t.Error("legacy maintenance Deploymentが残存")
+		t.Error("legacy maintenance Deployment still exists")
 	}
 	if exists(ctx, cl, &corev1.Service{}, nameMaintenance(m), ns) {
-		t.Error("legacy maintenance Serviceが残存")
+		t.Error("legacy maintenance Service still exists")
 	}
 	if !exists(ctx, cl, &corev1.ConfigMap{}, nameMaintenanceHTML(m), ns) {
-		t.Error("maintenance HTML ConfigMap未生成")
+		t.Error("maintenance HTML ConfigMap not created")
 	}
 	if !exists(ctx, cl, &networkingv1.Ingress{}, m.Name, ns) {
-		t.Error("Ingress未生成")
+		t.Error("Ingress not created")
 	}
 
 	// maintenanceのみ無効化 → HTML ConfigMapだけ掃除、proxyは残る
 	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Proxy.Maintenance.Enabled = boolPtr(false) })
 	reconcile()
 	if exists(ctx, cl, &corev1.ConfigMap{}, nameMaintenanceHTML(m), ns) {
-		t.Error("maintenance無効化後もHTML ConfigMapが残存")
+		t.Error("HTML ConfigMap still exists after disabling maintenance")
 	}
 	if !exists(ctx, cl, &appsv1.Deployment{}, nameProxy(m), ns) {
-		t.Error("maintenance無効化でproxy Deploymentまで消えた")
+		t.Error("proxy Deployment removed by disabling maintenance")
 	}
 
 	// proxy+ingress無効化 → 全掃除
@@ -703,16 +703,16 @@ func TestOptOutCleanup(t *testing.T) {
 	})
 	reconcile()
 	if exists(ctx, cl, &appsv1.Deployment{}, nameProxy(m), ns) {
-		t.Error("proxy無効化後もDeploymentが残存")
+		t.Error("Deployment still exists after disabling proxy")
 	}
 	if exists(ctx, cl, &corev1.Service{}, nameProxy(m), ns) {
-		t.Error("proxy無効化後もServiceが残存")
+		t.Error("Service still exists after disabling proxy")
 	}
 	if exists(ctx, cl, &policyv1.PodDisruptionBudget{}, nameProxy(m), ns) {
-		t.Error("proxy無効化後もPDBが残存")
+		t.Error("PDB still exists after disabling proxy")
 	}
 	if exists(ctx, cl, &networkingv1.Ingress{}, m.Name, ns) {
-		t.Error("ingress無効化後もIngressが残存")
+		t.Error("Ingress still exists after disabling ingress")
 	}
 }
 
@@ -767,10 +767,10 @@ func TestMigrationRetryOnSpecChange(t *testing.T) {
 	// 入力不変 → 失敗Jobは保持(手動削除で再試行の設計)
 	reconcile()
 	if err := cl.Get(ctx, jobKey, job); err != nil {
-		t.Fatalf("同一入力の失敗Jobが消された: %v", err)
+		t.Fatalf("failed Job with unchanged inputs was deleted: %v", err)
 	}
 	if job.UID != origUID {
-		t.Error("同一入力なのにJobが作り直された")
+		t.Error("Job recreated despite unchanged inputs")
 	}
 
 	// 入力変更(concurrently flag) → 失敗Jobを削除し再生成
@@ -785,13 +785,13 @@ func TestMigrationRetryOnSpecChange(t *testing.T) {
 	reconcile() // 削除
 	reconcile() // 再生成
 	if err := cl.Get(ctx, jobKey, job); err != nil {
-		t.Fatalf("checksum変化後にJobが再生成されていない: %v", err)
+		t.Fatalf("Job not recreated after checksum change: %v", err)
 	}
 	if job.UID == origUID {
-		t.Error("checksum変化後も古い失敗Jobのまま")
+		t.Error("old failed Job still present after checksum change")
 	}
 	if job.Status.Failed != 0 {
-		t.Errorf("再生成Jobのstatusが引き継がれている: %+v", job.Status)
+		t.Errorf("recreated Job carried over old status: %+v", job.Status)
 	}
 }
 
@@ -856,7 +856,7 @@ func TestSecretRotationRollsPods(t *testing.T) {
 	}
 	before := dep.Spec.Template.Annotations[configChecksumAnnotation]
 	if before == "" {
-		t.Fatal("checksum annotationが空")
+		t.Fatal("checksum annotation is empty")
 	}
 
 	// Secret値をローテーション → checksumが変わりpodがローリングする
@@ -872,7 +872,7 @@ func TestSecretRotationRollsPods(t *testing.T) {
 		t.Fatal(err)
 	}
 	if dep.Spec.Template.Annotations[configChecksumAnnotation] == before {
-		t.Error("Secretローテーションでchecksumが変わらない")
+		t.Error("checksum unchanged after Secret rotation")
 	}
 }
 
@@ -910,27 +910,27 @@ func TestRedisStandaloneAuth(t *testing.T) {
 	// auth secret生成(passwordあり)
 	authSec := &corev1.Secret{}
 	if err := cl.Get(ctx, types.NamespacedName{Name: nameRedisAuthSecret(m), Namespace: ns}, authSec); err != nil {
-		t.Fatalf("redis auth secret未生成: %v", err)
+		t.Fatalf("redis auth secret not created: %v", err)
 	}
 	if len(authSec.Data["password"]) == 0 {
-		t.Error("redis auth secretにpasswordが無い")
+		t.Error("redis auth secret has no password")
 	}
 
 	// redis STS: sh -c requirepass + REDIS_PASSWORD/REDISCLI_AUTH env
 	sts := &appsv1.StatefulSet{}
 	if err := cl.Get(ctx, types.NamespacedName{Name: nameRedis(m), Namespace: ns}, sts); err != nil {
-		t.Fatalf("redis STS未生成: %v", err)
+		t.Fatalf("redis STS not created: %v", err)
 	}
 	c := sts.Spec.Template.Spec.Containers[0]
 	if len(c.Command) != 3 || c.Command[0] != "sh" || !strings.Contains(c.Command[2], `--requirepass "$REDIS_PASSWORD"`) {
-		t.Errorf("redis command requirepass無し: %+v", c.Command)
+		t.Errorf("redis command missing requirepass: %+v", c.Command)
 	}
 	envNames := map[string]bool{}
 	for _, e := range c.Env {
 		envNames[e.Name] = true
 	}
 	if !envNames["REDIS_PASSWORD"] || !envNames["REDISCLI_AUTH"] {
-		t.Errorf("redis env不足: %+v", c.Env)
+		t.Errorf("redis env missing: %+v", c.Env)
 	}
 
 	// config: redisブロックにpass: ${REDIS_PASSWORD}
@@ -939,7 +939,7 @@ func TestRedisStandaloneAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(cm.Data["default.yml"], "pass: ${REDIS_PASSWORD}") {
-		t.Errorf("default.ymlにredis pass無し:\n%s", cm.Data["default.yml"])
+		t.Errorf("default.yml missing redis pass:\n%s", cm.Data["default.yml"])
 	}
 }
 
@@ -1337,7 +1337,7 @@ func TestCELValidation(t *testing.T) {
 		{"image+imageFrom", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.ImageFrom = &misskeyv1alpha1.ImageFromSource{Channel: "stable"}
 		}},
-		{"imageもimageFromも無し", func(m *misskeyv1alpha1.Misskey) {
+		{"no image nor imageFrom", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.Image = ""
 		}},
 		{"recovery+backup same path without serverName", func(m *misskeyv1alpha1.Misskey) {
@@ -1421,7 +1421,7 @@ func TestCELValidation(t *testing.T) {
 			m.Spec.Postgres.Recovery = rec()
 			m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{DestinationPath: "s3://bk2/misskey"}
 		}},
-		{"imageFromのみ", func(m *misskeyv1alpha1.Misskey) {
+		{"imageFrom only", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.Image = ""
 			m.Spec.ImageFrom = &misskeyv1alpha1.ImageFromSource{Channel: "stable"}
 		}},
