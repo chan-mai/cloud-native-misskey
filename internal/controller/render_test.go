@@ -22,12 +22,47 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloudnative-misskey/api/v1alpha1"
 )
+
+// resumeReplicas: suspend解除直後のautoscaling再点火を含むreplicas決定
+func TestResumeReplicas(t *testing.T) {
+	auto := func(min *int32) *misskeyv1alpha1.AutoscalingSpec {
+		return &misskeyv1alpha1.AutoscalingSpec{MinReplicas: min, MaxReplicas: 5}
+	}
+	existing := func(replicas int32) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{ResourceVersion: "1"},
+			Spec:       appsv1.DeploymentSpec{Replicas: int32Ptr(replicas)},
+		}
+	}
+	cases := []struct {
+		name string
+		comp misskeyv1alpha1.ComponentSpec
+		dep  *appsv1.Deployment
+		want *int32
+	}{
+		{"static", misskeyv1alpha1.ComponentSpec{Replicas: int32Ptr(3)}, existing(0), int32Ptr(3)},
+		{"autoscaling+新規", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, &appsv1.Deployment{}, nil},
+		{"autoscaling+稼働中", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(2), nil},
+		{"autoscaling+suspend明け", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(nil)}, existing(0), int32Ptr(1)},
+		{"autoscaling+suspend明け+minReplicas", misskeyv1alpha1.ComponentSpec{Autoscaling: auto(int32Ptr(2))}, existing(0), int32Ptr(2)},
+	}
+	for _, tc := range cases {
+		got := resumeReplicas(tc.comp, tc.dep)
+		switch {
+		case tc.want == nil && got != nil:
+			t.Errorf("%s: got %d, want nil", tc.name, *got)
+		case tc.want != nil && (got == nil || *got != *tc.want):
+			t.Errorf("%s: got %v, want %d", tc.name, got, *tc.want)
+		}
+	}
+}
 
 func TestPoolerIgnoreStartupParameters(t *testing.T) {
 	m := newMisskey()

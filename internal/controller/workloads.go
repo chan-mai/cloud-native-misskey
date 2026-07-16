@@ -23,7 +23,9 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloudnative-misskey/api/v1alpha1"
@@ -95,7 +97,7 @@ func (r *MisskeyReconciler) reconcileApp(ctx context.Context, m *misskeyv1alpha1
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameApp(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleApp, m.Spec.App)
-		setDeployment(dep, m, roleApp, staticReplicas(m.Spec.App), pod, r.misskeyChecksum(ctx, m, p))
+		setDeployment(dep, m, roleApp, resumeReplicas(m.Spec.App, dep), pod, r.misskeyChecksum(ctx, m, p))
 		return nil
 	}); err != nil {
 		return err
@@ -111,7 +113,7 @@ func (r *MisskeyReconciler) reconcileWorker(ctx context.Context, m *misskeyv1alp
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameWorker(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, dep, func() error {
 		pod := buildMisskeyPodSpec(m, p, roleWorker, m.Spec.Worker)
-		setDeployment(dep, m, roleWorker, staticReplicas(m.Spec.Worker), pod, r.misskeyChecksum(ctx, m, p))
+		setDeployment(dep, m, roleWorker, resumeReplicas(m.Spec.Worker, dep), pod, r.misskeyChecksum(ctx, m, p))
 		return nil
 	}); err != nil {
 		return err
@@ -128,6 +130,47 @@ func staticReplicas(comp misskeyv1alpha1.ComponentSpec) *int32 {
 		return nil
 	}
 	return replicasOr(comp.Replicas, 1)
+}
+
+// resumeReplicas: apply mutate内でのreplicas決定
+// autoscaling有効かつ既存Deploymentがreplicas=0(suspend解除直後)ならminReplicasで再点火
+// HPAはspec.replicas=0のtargetをautoscaling無効として無視するため、kickなしではスタックする
+func resumeReplicas(comp misskeyv1alpha1.ComponentSpec, dep *appsv1.Deployment) *int32 {
+	if replicas := staticReplicas(comp); replicas != nil {
+		return replicas
+	}
+	if dep.ResourceVersion == "" || dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 {
+		return nil
+	}
+	return replicasOr(comp.Autoscaling.MinReplicas, 1)
+}
+
+// suspendWorkloads: app/workerをreplicas 0に落としautoscalerを削除
+// Deployment不在時は何も作らない(初回install前のsuspendはworkload未生成のまま)
+func (r *MisskeyReconciler) suspendWorkloads(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	for _, name := range []string{nameApp(m), nameWorker(m)} {
+		if err := r.deleteHPA(ctx, m, name); err != nil {
+			return err
+		}
+		if err := r.deleteScaledObject(ctx, m, name); err != nil {
+			return err
+		}
+		dep := &appsv1.Deployment{}
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, dep); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 {
+			dep.Spec.Replicas = int32Ptr(0)
+			if err := r.Update(ctx, dep); err != nil {
+				return err
+			}
+			r.event(m, corev1.EventTypeNormal, "Suspended", "Suspend", "scaled %s to 0 replicas", name)
+		}
+	}
+	return nil
 }
 
 // misskeyChecksum: app/worker podテンプレートのchecksum annotation

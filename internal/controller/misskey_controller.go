@@ -124,6 +124,10 @@ func (r *MisskeyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, reconcileErr
 	}
 	if !ready {
+		// suspend中は定常状態のため15sスピンせずdrift間隔で十分
+		if m.Spec.Suspend {
+			return ctrl.Result{RequeueAfter: r.driftInterval()}, nil
+		}
 		// podが起動途中の可能性(例: CNPGのapp secret出現待ち)
 		// 所有イベントが発火しなくてもstatusが収束するようrequeue
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -350,7 +354,13 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 			return err
 		}
 	}
-	if r.databaseReady(ctx, m, p) {
+	if m.Spec.Suspend {
+		// 休止: app/workerを0に落としautoscaler削除。migration/objectStorage Jobの新規作成もskip
+		// 実行中のmigration Jobは走り切らせる(途中killの方が危険)
+		if err := r.suspendWorkloads(ctx, m); err != nil {
+			return err
+		}
+	} else if r.databaseReady(ctx, m, p) {
 		complete, err := r.reconcileMigration(ctx, m, p)
 		if err != nil {
 			return err
@@ -454,6 +464,12 @@ func (r *MisskeyReconciler) updateStatus(ctx context.Context, m *misskeyv1alpha1
 		readyReason = "ReconcileError"
 		readyMsg = reconcileErr.Error()
 		phase = "Error"
+	case m.Spec.Suspend:
+		ready = false
+		readySt = metav1.ConditionFalse
+		readyReason = "Suspended"
+		readyMsg = "suspended by spec.suspend"
+		phase = "Suspended"
 	case ready:
 		// Running
 	default:

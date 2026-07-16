@@ -55,6 +55,12 @@ type MisskeySpec struct {
 	// +optional
 	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 
+	// Suspend scales the app and worker Deployments to zero and pauses new
+	// migration/objectStorage Jobs. The proxy (serving the maintenance page),
+	// database, Redis and MeiliSearch keep running so data stays intact.
+	// +optional
+	Suspend bool `json:"suspend,omitempty"`
+
 	// Tenant is the tenant identifier stamped as the cloudnative-misskey.dev/tenant
 	// label on every managed resource and pod (incl. CNPG pods), for per-tenant log
 	// and metric routing. Immutable; defaults to the namespace when omitted. Setting
@@ -1192,7 +1198,7 @@ type MisskeyStatus struct {
 
 	// Phase is a coarse state summary: Progressing (subsystems not all ready),
 	// Running (all ready), or Error (reconcile failed).
-	// +kubebuilder:validation:Enum=Progressing;Running;Error
+	// +kubebuilder:validation:Enum=Progressing;Running;Error;Suspended
 	// +optional
 	Phase string `json:"phase,omitempty"`
 

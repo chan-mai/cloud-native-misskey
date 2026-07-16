@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -207,6 +208,134 @@ func TestReconcileIntegration(t *testing.T) {
 	}
 	if err := cl.Get(ctx, req.NamespacedName, &misskeyv1alpha1.Misskey{}); !apierrors.IsNotFound(err) {
 		t.Errorf("削除後もMisskeyが残存: %v", err)
+	}
+}
+
+// TestSuspendResume: spec.suspendでapp/workerが0になり、resumeでautoscaling込みで復帰すること
+func TestSuspendResume(t *testing.T) {
+	ctx, cl, sch := setupEnvtest(t)
+	ns := "suspend"
+	if err := cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatalf("ns: %v", err)
+	}
+
+	m := &misskeyv1alpha1.Misskey{
+		ObjectMeta: metav1.ObjectMeta{Name: "sus", Namespace: ns},
+		Spec: misskeyv1alpha1.MisskeySpec{
+			URL:    "https://sus.example.com/",
+			Image:  "misskey/misskey:v1",
+			Search: misskeyv1alpha1.SearchSpec{Provider: misskeyv1alpha1.SearchSQLLike},
+			App: misskeyv1alpha1.ComponentSpec{
+				Autoscaling: &misskeyv1alpha1.AutoscalingSpec{MaxReplicas: 3},
+			},
+			Postgres: misskeyv1alpha1.PostgresSpec{External: &misskeyv1alpha1.ExternalPostgres{
+				Host: "pg", Database: "d", User: "u",
+				PasswordSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "pgsec"}, Key: "pw"},
+			}},
+			Redis: misskeyv1alpha1.RedisSpec{External: &misskeyv1alpha1.ExternalRedis{Host: "redis"}},
+		},
+	}
+	if err := cl.Create(ctx, m); err != nil {
+		t.Fatalf("create misskey: %v", err)
+	}
+
+	r := &MisskeyReconciler{Client: cl, Scheme: sch}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "sus", Namespace: ns}}
+	reconcile := func() {
+		if _, err := r.Reconcile(ctx, req); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+	}
+	update := func(mutate func(*misskeyv1alpha1.Misskey)) {
+		cur := &misskeyv1alpha1.Misskey{}
+		if err := cl.Get(ctx, req.NamespacedName, cur); err != nil {
+			t.Fatal(err)
+		}
+		mutate(cur)
+		if err := cl.Update(ctx, cur); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+	}
+	succeedMigration := func() {
+		cur := &misskeyv1alpha1.Misskey{}
+		if err := cl.Get(ctx, req.NamespacedName, cur); err != nil {
+			t.Fatal(err)
+		}
+		job := &batchv1.Job{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: nameMigrate(cur), Namespace: ns}, job); err != nil {
+			t.Fatalf("migration job: %v", err)
+		}
+		job.Status.Succeeded = 1
+		if err := cl.Status().Update(ctx, job); err != nil {
+			t.Fatalf("job status: %v", err)
+		}
+	}
+	appReplicas := func() int32 {
+		dep := &appsv1.Deployment{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: nameApp(m), Namespace: ns}, dep); err != nil {
+			t.Fatalf("app deployment: %v", err)
+		}
+		if dep.Spec.Replicas == nil {
+			return -1
+		}
+		return *dep.Spec.Replicas
+	}
+
+	// 稼働到達: migration成功→app/worker生成、appはHPA付き
+	for i := 0; i < 2; i++ {
+		reconcile()
+	}
+	succeedMigration()
+	for i := 0; i < 2; i++ {
+		reconcile()
+	}
+	if !exists(ctx, cl, &appsv1.Deployment{}, nameApp(m), ns) || !exists(ctx, cl, &appsv1.Deployment{}, nameWorker(m), ns) {
+		t.Fatal("app/worker Deployment未生成")
+	}
+	if !exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
+		t.Fatal("app HPA未生成")
+	}
+
+	// suspend → replicas 0・HPA削除・Phase=Suspended
+	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Suspend = true })
+	reconcile()
+	if got := appReplicas(); got != 0 {
+		t.Errorf("suspend後のapp replicas=%d, want 0", got)
+	}
+	if exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
+		t.Error("suspend後もHPAが残存")
+	}
+	cur := &misskeyv1alpha1.Misskey{}
+	if err := cl.Get(ctx, req.NamespacedName, cur); err != nil {
+		t.Fatal(err)
+	}
+	if cur.Status.Phase != "Suspended" {
+		t.Errorf("phase=%q, want Suspended", cur.Status.Phase)
+	}
+	if !hasCondition(cur, "Ready", metav1.ConditionFalse) {
+		t.Errorf("Ready!=False: %+v", cur.Status.Conditions)
+	}
+
+	// suspend中のimage変更では新migration Jobを作らない
+	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Image = "misskey/misskey:v2" })
+	reconcile()
+	cl.Get(ctx, req.NamespacedName, cur)
+	if exists(ctx, cl, &batchv1.Job{}, nameMigrate(cur), ns) {
+		t.Error("suspend中に新migration Jobが生成された")
+	}
+
+	// resume → 新migration完了後にapp replicasがminReplicas(既定1)で再点火
+	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Suspend = false })
+	reconcile()
+	succeedMigration()
+	for i := 0; i < 2; i++ {
+		reconcile()
+	}
+	if got := appReplicas(); got != 1 {
+		t.Errorf("resume後のapp replicas=%d, want 1", got)
+	}
+	if !exists(ctx, cl, &autoscalingv2.HorizontalPodAutoscaler{}, nameApp(m), ns) {
+		t.Error("resume後もHPA未生成")
 	}
 }
 

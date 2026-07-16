@@ -2551,6 +2551,12 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              suspend:
+                description: |-
+                  Suspend scales the app and worker Deployments to zero and pauses new
+                  migration/objectStorage Jobs. The proxy (serving the maintenance page),
+                  database, Redis and MeiliSearch keep running so data stays intact.
+                type: boolean
               tenancy:
                 description: |-
                   Tenancy configures namespace-scoped isolation, assuming the namespace is
@@ -2897,6 +2903,7 @@ spec:
                 - Progressing
                 - Running
                 - Error
+                - Suspended
                 type: string
               redisHost:
                 description: |-
