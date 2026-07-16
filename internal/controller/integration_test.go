@@ -1003,12 +1003,26 @@ func TestCELValidation(t *testing.T) {
 	if err := cl.Create(ctx, okRec); err != nil {
 		t.Fatalf("recovery at creation must be accepted: %v", err)
 	}
+	imp := func() *misskeyv1alpha1.PostgresImport {
+		return &misskeyv1alpha1.PostgresImport{Source: misskeyv1alpha1.ImportSource{
+			Host: "src-pg", Database: "d", User: "u",
+			PasswordSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "s"}, Key: "p"},
+		}}
+	}
+	okImp := valid("ok-imp")
+	okImp.Spec.Postgres.Import = imp()
+	if err := cl.Create(ctx, okImp); err != nil {
+		t.Fatalf("import at creation must be accepted: %v", err)
+	}
 	recImmutable := []struct {
 		name   string
 		target string
 		mutate func(*misskeyv1alpha1.Misskey)
 	}{
 		{"recovery add after creation", "ok", func(m *misskeyv1alpha1.Misskey) { m.Spec.Postgres.Recovery = rec() }},
+		{"import add after creation", "ok", func(m *misskeyv1alpha1.Misskey) { m.Spec.Postgres.Import = imp() }},
+		{"import host change", "ok-imp", func(m *misskeyv1alpha1.Misskey) { m.Spec.Postgres.Import.Source.Host = "other" }},
+		{"import removal", "ok-imp", func(m *misskeyv1alpha1.Misskey) { m.Spec.Postgres.Import = nil }},
 		{"recovery targetTime change", "ok-rec", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.Postgres.Recovery.TargetTime = "2026-07-15T00:00:00Z"
 		}},
@@ -1056,6 +1070,14 @@ func TestCELValidation(t *testing.T) {
 		{"recovery+external", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.Postgres.External = extPG
 			m.Spec.Postgres.Recovery = rec()
+		}},
+		{"import+external", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Postgres.External = extPG
+			m.Spec.Postgres.Import = imp()
+		}},
+		{"import+recovery", func(m *misskeyv1alpha1.Misskey) {
+			m.Spec.Postgres.Recovery = rec()
+			m.Spec.Postgres.Import = imp()
 		}},
 		{"recovery+backup same path without serverName", func(m *misskeyv1alpha1.Misskey) {
 			m.Spec.Postgres.Recovery = rec()

@@ -978,6 +978,47 @@ func TestBuildDBClusterBackupServerName(t *testing.T) {
 	}
 }
 
+func TestBuildDBClusterImport(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Search.Provider = misskeyv1alpha1.SearchSQLPgroonga
+	m.Spec.Postgres.Import = &misskeyv1alpha1.PostgresImport{Source: misskeyv1alpha1.ImportSource{
+		Host: "old-pg", Database: "misskey0", User: "mk",
+		PasswordSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "srcpw"}, Key: "pw"},
+	}}
+	spec := buildDBCluster(m).Object["spec"].(map[string]any)
+
+	bootstrap := spec["bootstrap"].(map[string]any)
+	if _, ok := bootstrap["recovery"]; ok {
+		t.Errorf("recovery must be absent with import: %+v", bootstrap)
+	}
+	initdb := bootstrap["initdb"].(map[string]any)
+	if initdb["database"] != "misskey" || initdb["owner"] != "misskey" {
+		t.Errorf("initdb defaults: %+v", initdb)
+	}
+	// pgroongaのpostInitはimport時も維持(restore前に拡張を用意)
+	if _, ok := initdb["postInitApplicationSQL"]; !ok {
+		t.Errorf("postInitApplicationSQL missing: %+v", initdb)
+	}
+	imp := initdb["import"].(map[string]any)
+	if imp["type"] != "microservice" {
+		t.Errorf("import type: %+v", imp)
+	}
+	if dbs := imp["databases"].([]any); len(dbs) != 1 || dbs[0] != "misskey0" {
+		t.Errorf("import databases: %+v", imp)
+	}
+	if imp["source"].(map[string]any)["externalCluster"] != "origin" {
+		t.Errorf("import source: %+v", imp)
+	}
+	ec := spec["externalClusters"].([]any)[0].(map[string]any)
+	conn := ec["connectionParameters"].(map[string]any)
+	if conn["host"] != "old-pg" || conn["port"] != "5432" || conn["user"] != "mk" || conn["dbname"] != "misskey0" || conn["sslmode"] != "prefer" {
+		t.Errorf("connectionParameters: %+v", conn)
+	}
+	if ec["password"].(map[string]any)["name"] != "srcpw" {
+		t.Errorf("password ref: %+v", ec["password"])
+	}
+}
+
 func TestBuildDBScheduledBackup(t *testing.T) {
 	m := newMisskey()
 	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{

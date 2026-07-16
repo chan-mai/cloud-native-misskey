@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -142,6 +143,30 @@ func buildDBCluster(m *misskeyv1alpha1.Misskey) *unstructured.Unstructured {
 		// recovery時は不要(拡張は復元データに含まれる)
 		if m.Spec.Search.Provider == misskeyv1alpha1.SearchSQLPgroonga {
 			initdb["postInitApplicationSQL"] = []any{"CREATE EXTENSION IF NOT EXISTS pgroonga"}
+		}
+		if imp := pg.Import; imp != nil {
+			// 稼働中の外部PostgreSQLからpg_dump/pg_restoreで論理インポート
+			initdb["import"] = map[string]any{
+				"type":      "microservice",
+				"databases": []any{imp.Source.Database},
+				"source":    map[string]any{"externalCluster": recoveryOriginName},
+			}
+			spec["externalClusters"] = []any{
+				map[string]any{
+					"name": recoveryOriginName,
+					"connectionParameters": map[string]any{
+						"host":    imp.Source.Host,
+						"port":    fmt.Sprint(int32OrDefault(imp.Source.Port, 5432)),
+						"user":    imp.Source.User,
+						"dbname":  imp.Source.Database,
+						"sslmode": stringOr(imp.Source.SSLMode, "prefer"),
+					},
+					"password": map[string]any{
+						"name": imp.Source.PasswordSecret.Name,
+						"key":  imp.Source.PasswordSecret.Key,
+					},
+				},
+			}
 		}
 		spec["bootstrap"] = map[string]any{"initdb": initdb}
 	}

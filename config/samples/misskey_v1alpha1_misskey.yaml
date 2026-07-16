@@ -88,6 +88,13 @@ spec:
     #         name: s3-credentials
     #         key: SECRET_ACCESS_KEY
     #   targetTime: "2026-07-15T00:00:00+09:00"  # 任意(PITR), 省略で最新WALまで
+    # 稼働中の外部PostgreSQLからの論理インポート(recoveryと排他, CR作成時のみ有効)
+    # import:
+    #   source:
+    #     host: old-server.example.internal
+    #     database: misskey
+    #     user: misskey
+    #     passwordSecret: { name: src-db-secret, key: password }
 
   proxy:
     enabled: true

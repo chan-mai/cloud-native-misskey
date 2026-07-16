@@ -155,6 +155,7 @@ spec:
 | `postgres.pooler` | (なし) | CNPG PgBouncer pooler(rw/ro)をopt-inで前段化 |
 | `postgres.backup` | (なし) | barmanObjectStoreバックアップ。`schedule`指定でScheduledBackup。`serverName`でアーカイブフォルダ名を上書き(復元先での衝突回避用) |
 | `postgres.recovery` | (なし) | 既存バックアップからのbootstrap復元(DR/移行)。CR作成時のみ有効・immutable。詳細は[バックアップからの復元](#バックアップからの復元drインスタンス移行) |
+| `postgres.import` | (なし) | 稼働中の外部PostgreSQLからの論理インポート(pg_dump/pg_restore)。CR作成時のみ有効・immutable。recoveryと排他 |
 | `migration.createIndexConcurrently` | `false` | `true`で`MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY=1`。note等の巨大表index作成の書込ロックを避ける(opt-in) |
 | `proxy.enabled` | `true` | Caddy proxyの有無 |
 | `ingress.className` | `nginx` | ingressClassName |
@@ -350,6 +351,28 @@ spec:
 - **復元されるのはDBのみ。** メディアはobject storage参照なので同一バケットを使い続ければ無傷、MeiliSearchインデックスは再構築、Redisのjob queueは失われます。
 - **`<name>-db`のCNPG Clusterが既に存在する場合、recoveryは無視されます**(既存クラスタをadoptするため)。`deletionPolicy: Retain`で残したClusterを同名CRで引き取る運用とは排他です。
 - CNPG 1.26でin-tree barmanObjectStoreはdeprecated(Barman Cloud Plugin推奨)。backup/recoveryのplugin移行は今後の課題です。
+
+### 稼働中DBからの論理インポート (`postgres.import`)
+
+バックアップを経由せず、稼働中の外部PostgreSQL(docker compose構成やRDS等)から直接移行する場合は`postgres.import`を使います。CNPGの`initdb.import`(microservice型)によるpg_dump/pg_restoreで、CR作成時にDBを丸ごと取り込みます。
+
+```yaml
+spec:
+  postgres:
+    import:
+      source:
+        host: old-server.example.internal
+        port: 5432
+        database: misskey
+        user: misskey
+        passwordSecret: { name: src-db-secret, key: password }
+        sslMode: prefer
+```
+
+- recoveryと同じくCR作成時のみ有効・immutable。recoveryとは排他です
+- インポート完了まで移行元DBへ到達できる必要があります(NetworkPolicy/FW注意)
+- `spec.url`/`spec.idGenerationMethod`は移行元と同一にしてください(recovery同様の警告が出ます)
+- 移行元でpgroonga等の拡張を使っている場合、`postgres.imageName`に拡張入りイメージが必要です
 
 ## 開発
 

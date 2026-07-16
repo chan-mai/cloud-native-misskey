@@ -840,6 +840,9 @@ type ExternalMeilisearch struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.backup))",message="backup requires managed PostgreSQL; remove postgres.external"
 // +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.recovery))",message="recovery requires managed PostgreSQL; remove postgres.external"
 // +kubebuilder:validation:XValidation:rule="has(oldSelf.recovery) == has(self.recovery) && (!has(self.recovery) || self.recovery == oldSelf.recovery)",message="postgres.recovery is immutable: it declares the instance's origin at creation and cannot be added, changed or removed afterwards"
+// +kubebuilder:validation:XValidation:rule="!(has(self.external) && has(self.__import__))",message="import requires managed PostgreSQL; remove postgres.external"
+// +kubebuilder:validation:XValidation:rule="!(has(self.recovery) && has(self.__import__))",message="import and recovery are mutually exclusive bootstrap sources"
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.__import__) == has(self.__import__) && (!has(self.__import__) || self.__import__ == oldSelf.__import__)",message="postgres.import is immutable: it declares the instance's origin at creation and cannot be added, changed or removed afterwards"
 // +kubebuilder:validation:XValidation:rule="!(has(self.backup) && has(self.recovery)) || self.backup.destinationPath != self.recovery.source.destinationPath || (has(self.backup.serverName) && self.backup.serverName != self.recovery.source.serverName)",message="backup would overwrite the recovery source WAL archive; set postgres.backup.serverName different from recovery.source.serverName when sharing destinationPath"
 type PostgresSpec struct {
 	// External points Misskey at an existing PostgreSQL. When set, CNPG is not used.
@@ -894,6 +897,13 @@ type PostgresSpec struct {
 	// inert afterwards — leave it in the manifest.
 	// +optional
 	Recovery *PostgresRecovery `json:"recovery,omitempty"`
+
+	// Import bootstraps the CNPG cluster by logically importing a running
+	// external PostgreSQL via pg_dump/pg_restore (CNPG initdb.import, for
+	// instance migration without an object store). Only honored at CR
+	// creation; immutable and inert afterwards — leave it in the manifest.
+	// +optional
+	Import *PostgresImport `json:"import,omitempty"`
 
 	// ReadOffload wires Misskey dbReplications onto CNPG standby replicas so reads
 	// are load-balanced off the primary. Defaults on when instances >= 2; set false
@@ -1030,6 +1040,51 @@ type RecoverySource struct {
 	// S3Credentials references the access/secret keys.
 	// +optional
 	S3Credentials *S3Credentials `json:"s3Credentials,omitempty"`
+}
+
+// PostgresImport bootstraps the managed CNPG cluster by logically importing an
+// existing PostgreSQL database.
+type PostgresImport struct {
+	// Source is the running PostgreSQL to import from. It must stay reachable
+	// until the import completes.
+	// +kubebuilder:validation:Required
+	Source ImportSource `json:"source"`
+}
+
+// ImportSource references a running external PostgreSQL to import from.
+type ImportSource struct {
+	// Host of the source PostgreSQL.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	Host string `json:"host"`
+
+	// Port of the source PostgreSQL.
+	// +kubebuilder:default=5432
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// Database name to import.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	Database string `json:"database"`
+
+	// User name on the source.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	User string `json:"user"`
+
+	// PasswordSecret references the source user's password.
+	// +kubebuilder:validation:Required
+	PasswordSecret corev1.SecretKeySelector `json:"passwordSecret"`
+
+	// SSLMode for the connection to the source.
+	// +kubebuilder:validation:Enum=disable;allow;prefer;require;verify-ca;verify-full
+	// +kubebuilder:default=prefer
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
 }
 
 // S3Credentials references S3-compatible credentials stored in secrets.

@@ -864,6 +864,83 @@ spec:
                     default: ghcr.io/cloudnative-pg/postgresql:17
                     description: ImageName overrides the CNPG PostgreSQL image.
                     type: string
+                  import:
+                    description: |-
+                      Import bootstraps the CNPG cluster by logically importing a running
+                      external PostgreSQL via pg_dump/pg_restore (CNPG initdb.import, for
+                      instance migration without an object store). Only honored at CR
+                      creation; immutable and inert afterwards — leave it in the manifest.
+                    properties:
+                      source:
+                        description: |-
+                          Source is the running PostgreSQL to import from. It must stay reachable
+                          until the import completes.
+                        properties:
+                          database:
+                            description: Database name to import.
+                            maxLength: 255
+                            minLength: 1
+                            type: string
+                          host:
+                            description: Host of the source PostgreSQL.
+                            maxLength: 255
+                            minLength: 1
+                            type: string
+                          passwordSecret:
+                            description: PasswordSecret references the source user's
+                              password.
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          port:
+                            default: 5432
+                            description: Port of the source PostgreSQL.
+                            format: int32
+                            type: integer
+                          sslMode:
+                            default: prefer
+                            description: SSLMode for the connection to the source.
+                            enum:
+                            - disable
+                            - allow
+                            - prefer
+                            - require
+                            - verify-ca
+                            - verify-full
+                            type: string
+                          user:
+                            description: User name on the source.
+                            maxLength: 255
+                            minLength: 1
+                            type: string
+                        required:
+                        - database
+                        - host
+                        - passwordSecret
+                        - user
+                        type: object
+                    required:
+                    - source
+                    type: object
                   instances:
                     default: 1
                     description: Instances is the CNPG cluster size (1 = single, >=2
@@ -1157,6 +1234,14 @@ spec:
                     origin at creation and cannot be added, changed or removed afterwards'
                   rule: has(oldSelf.recovery) == has(self.recovery) && (!has(self.recovery)
                     || self.recovery == oldSelf.recovery)
+                - message: import requires managed PostgreSQL; remove postgres.external
+                  rule: '!(has(self.external) && has(self.__import__))'
+                - message: import and recovery are mutually exclusive bootstrap sources
+                  rule: '!(has(self.recovery) && has(self.__import__))'
+                - message: 'postgres.import is immutable: it declares the instance''s
+                    origin at creation and cannot be added, changed or removed afterwards'
+                  rule: has(oldSelf.__import__) == has(self.__import__) && (!has(self.__import__)
+                    || self.__import__ == oldSelf.__import__)
                 - message: backup would overwrite the recovery source WAL archive;
                     set postgres.backup.serverName different from recovery.source.serverName
                     when sharing destinationPath
