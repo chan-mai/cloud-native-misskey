@@ -21,8 +21,12 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	kauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	misskeyv1alpha1 "github.com/chan-mai/cloudnative-misskey/api/v1alpha1"
@@ -64,17 +68,54 @@ func channelImageFor(ch *misskeyv1alpha1.MisskeyChannel, bucket uint32, now time
 	return prev
 }
 
-// resolveImage: imageFrom時にChannelからimageを解決しm.Spec.Imageへin-memory代入する
-// 代入はこのreconcileの計算にのみ使い、絶対にpersistしない(specへのUpdateはfinalizer付与のみで
-// resolveImageより前に完了している)。以降のnameMigrate/podSpec/checksumは無変更で解決値を使う
+// resolveImage: imageFromのChannel解決とtrackImageDigestのdigest pinをm.Spec.Imageへ
+// in-memory代入する。代入はこのreconcileの計算にのみ使い、絶対にpersistしない(specへの
+// Updateはfinalizer付与のみでresolveImageより前に完了している)
+// 以降のnameMigrate/podSpec/checksumは無変更で解決値を使う
 func (r *MisskeyReconciler) resolveImage(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
-	if m.Spec.ImageFrom == nil {
+	if m.Spec.ImageFrom != nil {
+		ch := &misskeyv1alpha1.MisskeyChannel{}
+		if err := r.Get(ctx, types.NamespacedName{Name: m.Spec.ImageFrom.Channel}, ch); err != nil {
+			return fmt.Errorf("resolve imageFrom.channel %q: %w", m.Spec.ImageFrom.Channel, err)
+		}
+		m.Spec.Image = channelImageFor(ch, channelBucket(m.Namespace, m.Name), time.Now())
+	}
+	if !m.Spec.TrackImageDigest || strings.Contains(m.Spec.Image, "@") {
 		return nil
 	}
-	ch := &misskeyv1alpha1.MisskeyChannel{}
-	if err := r.Get(ctx, types.NamespacedName{Name: m.Spec.ImageFrom.Channel}, ch); err != nil {
-		return fmt.Errorf("resolve imageFrom.channel %q: %w", m.Spec.ImageFrom.Channel, err)
+	if r.Digests == nil {
+		return fmt.Errorf("trackImageDigest requested but no digest resolver configured")
 	}
-	m.Spec.Image = channelImageFor(ch, channelBucket(m.Namespace, m.Name), time.Now())
+	keychain, err := r.pullSecretKeychain(ctx, m)
+	if err != nil {
+		return err
+	}
+	pinned, err := r.Digests.Pinned(ctx, m.Spec.Image, keychain)
+	if err != nil {
+		// レジストリ不達かつcache無し(operator再起動直後等)は直前にstatusへ出したpinを継続し、
+		// bare tagへのflapによる無用なrollを避ける。それも無い初回のみエラー
+		if strings.HasPrefix(m.Status.Image, m.Spec.Image+"@") {
+			m.Spec.Image = m.Status.Image
+			return nil
+		}
+		return fmt.Errorf("track image digest: %w", err)
+	}
+	m.Spec.Image = pinned
 	return nil
+}
+
+// pullSecretKeychain: imagePullSecretsからレジストリ認証keychainを構築(未指定はnil=anonymous)
+func (r *MisskeyReconciler) pullSecretKeychain(ctx context.Context, m *misskeyv1alpha1.Misskey) (authn.Keychain, error) {
+	if len(m.Spec.ImagePullSecrets) == 0 {
+		return nil, nil
+	}
+	secrets := make([]corev1.Secret, 0, len(m.Spec.ImagePullSecrets))
+	for _, ref := range m.Spec.ImagePullSecrets {
+		s := corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: m.Namespace}, &s); err != nil {
+			return nil, fmt.Errorf("imagePullSecret %q: %w", ref.Name, err)
+		}
+		secrets = append(secrets, s)
+	}
+	return kauth.NewFromPullSecrets(ctx, secrets)
 }

@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
@@ -509,6 +510,85 @@ func TestChannelStagedRollout(t *testing.T) {
 	}
 	if got := statusImage(reqLate); got != "misskey/misskey:v1" {
 		t.Errorf("late(bucket>=50)=%s, want v1", got)
+	}
+}
+
+// TestChannelDigestTracking: trackImageDigestで同一タグの中身変更が段階ロールアウトに乗ること
+func TestChannelDigestTracking(t *testing.T) {
+	ctx, cl, sch := setupEnvtest(t)
+	ns := "chan-digest"
+	if err := cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatalf("ns: %v", err)
+	}
+
+	dr := NewDigestResolver()
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "sha256:d1", nil
+	}
+	ch := &misskeyv1alpha1.MisskeyChannel{
+		ObjectMeta: metav1.ObjectMeta{Name: "tracked"},
+		Spec: misskeyv1alpha1.MisskeyChannelSpec{
+			Image:            "misskey/misskey:latest",
+			TrackImageDigest: true,
+			Rollout:          &misskeyv1alpha1.ChannelRollout{BatchPercent: 50, Interval: metav1.Duration{Duration: time.Hour}},
+		},
+	}
+	if err := cl.Create(ctx, ch); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	cr := &MisskeyChannelReconciler{Client: cl, Scheme: sch, Digests: dr}
+	chReq := ctrl.Request{NamespacedName: types.NamespacedName{Name: "tracked"}}
+	if _, err := cr.Reconcile(ctx, chReq); err != nil {
+		t.Fatalf("channel reconcile: %v", err)
+	}
+
+	cur := &misskeyv1alpha1.MisskeyChannel{}
+	if err := cl.Get(ctx, chReq.NamespacedName, cur); err != nil {
+		t.Fatal(err)
+	}
+	if cur.Status.Image != "misskey/misskey:latest@sha256:d1" {
+		t.Fatalf("初回pin: %s", cur.Status.Image)
+	}
+
+	// 同一タグでdigestだけ変化 → previousImageが立ちロールアウト開始
+	dr.mu.Lock()
+	delete(dr.cache, "misskey/misskey:latest")
+	dr.mu.Unlock()
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "sha256:d2", nil
+	}
+	if _, err := cr.Reconcile(ctx, chReq); err != nil {
+		t.Fatalf("channel reconcile: %v", err)
+	}
+	if err := cl.Get(ctx, chReq.NamespacedName, cur); err != nil {
+		t.Fatal(err)
+	}
+	if cur.Status.Image != "misskey/misskey:latest@sha256:d2" || cur.Status.PreviousImage != "misskey/misskey:latest@sha256:d1" {
+		t.Errorf("digest変更でロールアウトが始まっていない: %+v", cur.Status)
+	}
+	if cur.Status.ImageChangedAt.IsZero() {
+		t.Error("imageChangedAt未設定")
+	}
+
+	// 解決失敗時はstatus維持(rollout状態を壊さない)
+	dr.mu.Lock()
+	delete(dr.cache, "misskey/misskey:latest")
+	dr.mu.Unlock()
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "", fmt.Errorf("registry down")
+	}
+	res, err := cr.Reconcile(ctx, chReq)
+	if err != nil {
+		t.Fatalf("channel reconcile: %v", err)
+	}
+	if res.RequeueAfter != time.Minute {
+		t.Errorf("解決失敗時は短いrequeue: %v", res.RequeueAfter)
+	}
+	if err := cl.Get(ctx, chReq.NamespacedName, cur); err != nil {
+		t.Fatal(err)
+	}
+	if cur.Status.Image != "misskey/misskey:latest@sha256:d2" {
+		t.Errorf("解決失敗でstatusが壊れた: %s", cur.Status.Image)
 	}
 }
 

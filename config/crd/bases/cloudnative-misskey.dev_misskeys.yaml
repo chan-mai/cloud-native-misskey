@@ -2829,6 +2829,14 @@ spec:
                 x-kubernetes-validations:
                 - message: tenant is immutable
                   rule: self == oldSelf
+              trackImageDigest:
+                description: |-
+                  TrackImageDigest makes the operator resolve the image tag to its digest
+                  against the registry and pin pods to image@digest, re-resolving
+                  periodically. Content pushed under the same (mutable) tag — e.g. latest —
+                  then rolls app/worker automatically. Uses imagePullSecrets for private
+                  registries.
+                type: boolean
               url:
                 description: |-
                   URL is the public-facing URL of the instance, e.g. https://misskey.example.com/.

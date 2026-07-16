@@ -34,6 +34,14 @@ type MisskeyChannelSpec struct {
 	// switches to the new image. Omit for immediate rollout to everyone.
 	// +optional
 	Rollout *ChannelRollout `json:"rollout,omitempty"`
+
+	// TrackImageDigest makes the operator resolve the image tag to its digest
+	// and distribute image@digest, re-resolving periodically. Content pushed
+	// under the same (mutable) tag then starts a new (staged) rollout across
+	// the fleet. Anonymous registry access only — use digest-pinned instances
+	// with imagePullSecrets for private registries.
+	// +optional
+	TrackImageDigest bool `json:"trackImageDigest,omitempty"`
 }
 
 // ChannelRollout configures the staged rollout pace.

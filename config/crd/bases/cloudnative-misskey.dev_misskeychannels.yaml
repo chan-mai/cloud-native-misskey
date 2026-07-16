@@ -79,6 +79,14 @@ spec:
                     description: Interval between batches.
                     type: string
                 type: object
+              trackImageDigest:
+                description: |-
+                  TrackImageDigest makes the operator resolve the image tag to its digest
+                  and distribute image@digest, re-resolving periodically. Content pushed
+                  under the same (mutable) tag then starts a new (staged) rollout across
+                  the fleet. Anonymous registry access only — use digest-pinned instances
+                  with imagePullSecrets for private registries.
+                type: boolean
             required:
             - image
             type: object

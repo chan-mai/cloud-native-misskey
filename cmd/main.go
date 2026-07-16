@@ -100,18 +100,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	digests := controller.NewDigestResolver()
 	if err = (&controller.MisskeyReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		Recorder:            mgr.GetEventRecorder("cloudnative-misskey"),
 		DriftResyncInterval: driftResyncInterval,
+		Digests:             digests,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Misskey")
 		os.Exit(1)
 	}
 	if err = (&controller.MisskeyChannelReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Digests: digests,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MisskeyChannel")
 		os.Exit(1)

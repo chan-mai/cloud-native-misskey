@@ -43,6 +43,14 @@ type MisskeySpec struct {
 	// +optional
 	ImageFrom *ImageFromSource `json:"imageFrom,omitempty"`
 
+	// TrackImageDigest makes the operator resolve the image tag to its digest
+	// against the registry and pin pods to image@digest, re-resolving
+	// periodically. Content pushed under the same (mutable) tag — e.g. latest —
+	// then rolls app/worker automatically. Uses imagePullSecrets for private
+	// registries.
+	// +optional
+	TrackImageDigest bool `json:"trackImageDigest,omitempty"`
+
 	// IDGenerationMethod is Misskey's note/user id format. Immutable after the
 	// instance has been initialized; when migrating an existing database, set it
 	// to the value the database was created with.

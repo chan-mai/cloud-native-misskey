@@ -97,6 +97,19 @@ func TestAdvisoryWarnings(t *testing.T) {
 		t.Errorf("rps with monitoring must not warn: %v", w)
 	}
 
+	// mutableなlatestタグ+digest追従なし → 警告
+	for _, img := range []string{"misskey/misskey:latest", "misskey/misskey"} {
+		m4 := base()
+		m4.Spec.Image = img
+		if w := advisoryWarnings(m4); len(w) == 0 || !strings.Contains(strings.Join(w, " "), "trackImageDigest") {
+			t.Errorf("expected latest-tag warning for %q, got %v", img, w)
+		}
+		m4.Spec.TrackImageDigest = true
+		if w := advisoryWarnings(m4); len(w) != 0 {
+			t.Errorf("trackImageDigest有効なら警告なし: %v", w)
+		}
+	}
+
 	// 正常specは警告なし
 	if w := advisoryWarnings(base()); len(w) != 0 {
 		t.Errorf("clean spec must have no warnings: %v", w)

@@ -54,6 +54,8 @@ type MisskeyReconciler struct {
 	// DriftResyncInterval: ready収束後の定期requeue間隔。watchしない外部CRD
 	// (CNPG/redis-operator/KEDA)のSSA再適用でドリフトを是正。0で既定
 	DriftResyncInterval time.Duration
+	// Digests: trackImageDigest時のtag→digest解決(channel controllerと共有)
+	Digests *DigestResolver
 }
 
 // watchしない外部CRDのドリフト是正requeueの既定間隔

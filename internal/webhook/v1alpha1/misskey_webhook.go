@@ -120,6 +120,12 @@ func advisoryWarnings(m *misskeyv1alpha1.Misskey) admission.Warnings {
 	if rpsSet && (m.Spec.Monitoring.Enabled == nil || !*m.Spec.Monitoring.Enabled) {
 		warns = append(warns, "autoscaling.rps needs monitoring.enabled so the proxy metrics port is exposed and scraped")
 	}
+	if img := m.Spec.Image; img != "" && !m.Spec.TrackImageDigest && !strings.Contains(img, "@") {
+		// タグ無し(=latest)か明示:latestはmutable。digest追従なしだと再pushでrollしない
+		if !strings.Contains(img[strings.LastIndex(img, "/")+1:], ":") || strings.HasSuffix(img, ":latest") {
+			warns = append(warns, "spec.image uses a mutable latest tag; set trackImageDigest: true or pin a version/digest, otherwise new pushes never roll app/worker")
+		}
+	}
 	if os := m.Spec.ObjectStorage; os != nil {
 		if os.SetPublicRead != nil && *os.SetPublicRead && strings.Contains(os.Endpoint, "r2.cloudflarestorage.com") {
 			warns = append(warns, "spec.objectStorage.setPublicRead must be false for Cloudflare R2 (it does not support object ACLs)")

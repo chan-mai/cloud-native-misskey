@@ -70,6 +70,8 @@ kubectl apply -f https://github.com/chan-mai/cloudnative-misskey/releases/latest
 kubectl apply -f https://github.com/chan-mai/cloudnative-misskey/releases/latest/download/install-webhook.yaml
 ```
 
+install manifestのoperator imageは`vX.Y.Z@sha256:...`のdigest固定です。タグの打ち直しに影響されず、applyしたものが常にそのリリースのバイナリになります。`ghcr.io/...:latest`タグも存在しますが検証用で、本番デプロイにはversion tag(=リリースmanifest)を使ってください。
+
 ソースからの適用:
 
 ```bash
@@ -136,6 +138,7 @@ spec:
 |---|---|---|
 | `url` | (必須) | 公開URL。初期化後は変更不可 |
 | `image` | (どちらか必須) | Misskeyのimage。app/worker共通。`imageFrom`と排他 |
+| `trackImageDigest` | `false` | imageのタグをレジストリでdigest解決しpodを`image@digest`にpin、定期再解決(5分TTL)する。`:latest`等のmutableタグへの再pushを検知してapp/workerを自動ロール。private registryは`imagePullSecrets`で認証。offの場合はdigest付き参照を推奨(タグ打ち直しは検知されない) |
 | `imageFrom.channel` | (どちらか必須) | `MisskeyChannel`からimageを解決し段階ロールアウトに追従。詳細は[fleetのimage管理](#fleetのimage管理misskeychannel) |
 | `idGenerationMethod` | `aidx` | ID方式。初期化後は変更不可 |
 | `deletionPolicy` | `Delete` | CR削除時のデータ資源(CNPG/Redis/Meili/生成key Secret)の扱い。`Retain`でownerRefを外しデータ保持(同名CR再作成で再adopt) |
@@ -343,6 +346,7 @@ spec:
 channelの`image`を更新すると、各インスタンスはnamespace/名前のハッシュで0-99の固定バケットに割当てられ、`interval`ごとに`batchPercent`分のバケットが新imageへ切替わります(migration→app/workerロールの通常経路)。進捗は`kubectl get mkch`のInstances/Updated列と各Misskeyの`status.image`で確認できます。
 
 - `rollout`省略時は即時全量。初回のimage設定も即時です
+- `trackImageDigest: true`でchannelの`image`をdigest解決して配信します。`:latest`等のmutableタグへの再pushも「image変更」として検知され、**同一タグのまま段階ロールアウトに乗ります**。channelの解決はanonymousアクセスのみ(private registryはインスタンス側の`trackImageDigest`+`imagePullSecrets`か、digest付き参照を使用)
 - ロールアウト中にさらにimageを変えた場合、未切替インスタンスは新しいimageへ直接ジャンプします(2世代は追跡しない)
 - 参照先channelが存在しないとそのインスタンスはPhase=Errorになります
 - 切替の反映粒度はreconcile周期(既定でready時3分)です

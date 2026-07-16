@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,8 @@ import (
 type MisskeyChannelReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// Digests: trackImageDigest時のtag→digest解決(Misskey controllerと共有)
+	Digests *DigestResolver
 }
 
 // +kubebuilder:rbac:groups=cloudnative-misskey.dev,resources=misskeychannels,verbs=get;list;watch
@@ -49,12 +52,28 @@ func (r *MisskeyChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 参照インスタンスと現行imageへの追従数を集計
+	// 配信対象imageを決定。trackImageDigest時はtag→digestでpinし、同一タグの
+	// 中身変更もimage変更として段階ロールアウトに乗せる
+	target := ch.Spec.Image
+	var resolveErr error
+	if ch.Spec.TrackImageDigest {
+		if r.Digests == nil {
+			return ctrl.Result{}, fmt.Errorf("trackImageDigest requested but no digest resolver configured")
+		}
+		if pinned, err := r.Digests.Pinned(ctx, ch.Spec.Image, nil); err == nil {
+			target = pinned
+		} else {
+			// 解決不能時は現行statusを維持しrollout状態を壊さない。後段で短いrequeue
+			resolveErr = err
+			target = ch.Status.Image
+		}
+	}
+
+	// 参照インスタンスと配信対象imageへの追従数を集計
 	var list misskeyv1alpha1.MisskeyList
 	if err := r.List(ctx, &list); err != nil {
 		return ctrl.Result{}, err
 	}
-	target := ch.Spec.Image
 	var instances, updated int32
 	for i := range list.Items {
 		m := &list.Items[i]
@@ -62,7 +81,7 @@ func (r *MisskeyChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			continue
 		}
 		instances++
-		if m.Status.Image == target {
+		if target != "" && m.Status.Image == target {
 			updated++
 		}
 	}
@@ -73,12 +92,12 @@ func (r *MisskeyChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return err
 		}
 		// image変更検知でロールアウト開始。初回(previous無し)は即時全量
-		if cur.Spec.Image != cur.Status.Image {
+		if target != "" && target != cur.Status.Image {
 			if cur.Status.Image != "" {
 				cur.Status.PreviousImage = cur.Status.Image
 				cur.Status.ImageChangedAt = metav1.Now()
 			}
-			cur.Status.Image = cur.Spec.Image
+			cur.Status.Image = target
 		}
 		cur.Status.Instances = instances
 		cur.Status.UpdatedInstances = updated
@@ -88,16 +107,22 @@ func (r *MisskeyChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
-	// ロールアウト進行中はinterval周期でカウンタを追従
-	if ch.Spec.Rollout != nil && updated < instances {
-		interval := ch.Spec.Rollout.Interval.Duration
-		if interval <= 0 {
-			interval = time.Hour
-		}
-		return ctrl.Result{RequeueAfter: interval}, nil
+	if resolveErr != nil {
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
-	return ctrl.Result{}, nil
+
+	// ロールアウト進行中はinterval周期、digest追従時はTTL周期でrequeue
+	var requeue time.Duration
+	if ch.Spec.Rollout != nil && updated < instances {
+		requeue = ch.Spec.Rollout.Interval.Duration
+		if requeue <= 0 {
+			requeue = time.Hour
+		}
+	}
+	if ch.Spec.TrackImageDigest && (requeue == 0 || digestResolveTTL < requeue) {
+		requeue = digestResolveTTL
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 // channelOfMisskey: Misskeyの変化を参照先Channelのreconcileへ写像(追従カウンタ更新)

@@ -18,11 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package controller
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1156,6 +1158,99 @@ func TestIngressAnnotationsIssuerRef(t *testing.T) {
 	m.Spec.Ingress.Annotations = map[string]string{"cert-manager.io/issuer": "custom"}
 	if ann = ingressAnnotations(m, "nginx"); ann["cert-manager.io/issuer"] != "custom" {
 		t.Errorf("user annotation must win: %+v", ann)
+	}
+}
+
+func TestDigestResolverPinned(t *testing.T) {
+	ctx := t.Context()
+	calls := 0
+	dr := NewDigestResolver()
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		calls++
+		return "sha256:aaa", nil
+	}
+
+	// digest指定済みはレジストリに触れずそのまま
+	if got, err := dr.Pinned(ctx, "img:v1@sha256:zzz", nil); err != nil || got != "img:v1@sha256:zzz" || calls != 0 {
+		t.Errorf("pre-pinned passthrough: %v %v calls=%d", got, err, calls)
+	}
+	// 解決+TTL内cache
+	if got, _ := dr.Pinned(ctx, "img:latest", nil); got != "img:latest@sha256:aaa" {
+		t.Errorf("pinned: %v", got)
+	}
+	if _, _ = dr.Pinned(ctx, "img:latest", nil); calls != 1 {
+		t.Errorf("TTL内はcacheを使うべき: calls=%d", calls)
+	}
+	// TTL切れで再解決
+	dr.cache["img:latest"] = digestEntry{digest: "sha256:aaa", resolvedAt: time.Now().Add(-time.Hour)}
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "sha256:bbb", nil
+	}
+	if got, _ := dr.Pinned(ctx, "img:latest", nil); got != "img:latest@sha256:bbb" {
+		t.Errorf("TTL切れ再解決: %v", got)
+	}
+	// 失敗時はstale cacheへfallback
+	dr.cache["img:latest"] = digestEntry{digest: "sha256:bbb", resolvedAt: time.Now().Add(-time.Hour)}
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "", fmt.Errorf("registry down")
+	}
+	if got, err := dr.Pinned(ctx, "img:latest", nil); err != nil || got != "img:latest@sha256:bbb" {
+		t.Errorf("stale fallback: %v %v", got, err)
+	}
+	// cache無しの失敗はエラー
+	if _, err := dr.Pinned(ctx, "other:latest", nil); err == nil {
+		t.Error("cache無しの失敗はエラーになるべき")
+	}
+}
+
+func TestResolveImageTrackDigest(t *testing.T) {
+	ctx := t.Context()
+	dr := NewDigestResolver()
+	dr.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "sha256:abc", nil
+	}
+	r := &MisskeyReconciler{Digests: dr}
+
+	m := newMisskey()
+	m.Spec.Image = "misskey/misskey:latest"
+	m.Spec.TrackImageDigest = true
+	if err := r.resolveImage(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Spec.Image != "misskey/misskey:latest@sha256:abc" {
+		t.Errorf("pinned image: %s", m.Spec.Image)
+	}
+
+	// 解決失敗+cache無しでも直前のstatus pinがあれば継続(flap防止)
+	dr2 := NewDigestResolver()
+	dr2.headFunc = func(_ context.Context, _ string, _ authn.Keychain) (string, error) {
+		return "", fmt.Errorf("registry down")
+	}
+	r2 := &MisskeyReconciler{Digests: dr2}
+	m2 := newMisskey()
+	m2.Spec.Image = "misskey/misskey:latest"
+	m2.Spec.TrackImageDigest = true
+	m2.Status.Image = "misskey/misskey:latest@sha256:old"
+	if err := r2.resolveImage(ctx, m2); err != nil {
+		t.Fatal(err)
+	}
+	if m2.Spec.Image != "misskey/misskey:latest@sha256:old" {
+		t.Errorf("status pin継続: %s", m2.Spec.Image)
+	}
+
+	// statusにも無い初回失敗はエラー
+	m3 := newMisskey()
+	m3.Spec.Image = "misskey/misskey:latest"
+	m3.Spec.TrackImageDigest = true
+	if err := r2.resolveImage(ctx, m3); err == nil {
+		t.Error("初回解決失敗はエラーになるべき")
+	}
+
+	// 追従off/digest指定済みは無変換
+	m4 := newMisskey()
+	m4.Spec.Image = "misskey/misskey:2026.6.0"
+	if err := r2.resolveImage(ctx, m4); err != nil || m4.Spec.Image != "misskey/misskey:2026.6.0" {
+		t.Errorf("追従offは無変換: %s %v", m4.Spec.Image, err)
 	}
 }
 
