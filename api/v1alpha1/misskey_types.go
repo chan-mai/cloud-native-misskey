@@ -488,7 +488,7 @@ type ProxySpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Image for the Caddy proxy and maintenance containers.
+	// Image for the Caddy proxy container.
 	// +kubebuilder:default="caddy:2"
 	// +optional
 	Image string `json:"image,omitempty"`
@@ -511,7 +511,7 @@ type ProxySpec struct {
 
 // MaintenanceSpec configures the maintenance fallback served on backend errors.
 type MaintenanceSpec struct {
-	// Enabled toggles the maintenance fallback Deployment.
+	// Enabled toggles the maintenance fallback page served by the proxy itself.
 	// +kubebuilder:default=true
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`

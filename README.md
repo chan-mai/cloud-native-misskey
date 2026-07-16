@@ -11,7 +11,7 @@ flowchart TD
   CR["Misskey (CR)"]
 
   CR --> ing["Ingress"]
-  CR --> proxy["proxy: Caddy + maintenance"]
+  CR --> proxy["proxy: Caddy"]
   CR --> app["app Deployment + Service"]
   CR --> worker["worker Deployment"]
   CR --> redis["Redis StatefulSet"]
@@ -32,7 +32,7 @@ flowchart TD
 ## コンポーネント
 
 - **app**(`MK_ONLY_SERVER=true`)と**worker**(`MK_ONLY_QUEUE=true`)は同一imageを共有します。initContainerで`built/`をwritableなemptyDirにコピーし、`default.yml`の`${DB_PASSWORD}`/`${MEILI_KEY}`/`${REDIS_PASSWORD}`系/`${SETUP_PASSWORD}`をNodeスクリプトのリテラル置換(JSON quote)で展開します。シークレット値はConfigMapに載らず、改行や`#`等を含む値でもYAMLとして安全です。
-- **proxy**はCaddyでappに転送し、backend down時はmaintenanceにfallbackします。`proxy.enabled: false`で無効化でき、そのときIngressはappを直接指します。TLS終端は前段に委ねる前提で、plain HTTPで動きます。
+- **proxy**はCaddyでappに転送し、backend down時はproxy自身の`file_server`でメンテナンスページを配信します(`/api/*`以外は既定200、`/api/*`は実バックエンドstatusを返し外形監視を妨げない)。`proxy.enabled: false`で無効化でき、そのときIngressはappを直接指します。TLS終端は前段に委ねる前提で、plain HTTPで動きます。
 - **Redis**は`redis:8-alpine`(Redis 8を要件とする)を使い、`maxmemory`(既定400mb)と`maxmemory-policy`(既定`noeviction`)を設定し、job queue耐久化のためAOFを既定で有効にします。`redis.external`で外部参照もできます。
 - **MeiliSearch**のmaster keyは、未指定なら自動生成して`<name>-meilisearch` Secretに保存します。
 - **PostgreSQL**はCNPGの`Cluster`を生成します。app用の認証情報`<name>-db-app` SecretはCNPGが払い出し、Misskeyはそこからパスワードを読みます。`postgres.external`で外部DB参照もできます。

@@ -123,9 +123,11 @@ func selectorFor(m *misskeyv1alpha1.Misskey, component string) map[string]string
 }
 
 // 子オブジェクト名。すべてインスタンス名から決定的に導出
-func nameApp(m *misskeyv1alpha1.Misskey) string         { return m.Name + "-app" }
-func nameWorker(m *misskeyv1alpha1.Misskey) string      { return m.Name + "-worker" }
-func nameProxy(m *misskeyv1alpha1.Misskey) string       { return m.Name + "-proxy" }
+func nameApp(m *misskeyv1alpha1.Misskey) string    { return m.Name + "-app" }
+func nameWorker(m *misskeyv1alpha1.Misskey) string { return m.Name + "-worker" }
+func nameProxy(m *misskeyv1alpha1.Misskey) string  { return m.Name + "-proxy" }
+
+// nameMaintenance: 統合前構成の掃除専用(deleteLegacyMaintenanceWorkload), 数リリース後に削除可
 func nameMaintenance(m *misskeyv1alpha1.Misskey) string { return m.Name + "-maintenance" }
 func nameRedis(m *misskeyv1alpha1.Misskey) string       { return m.Name + "-redis" }
 

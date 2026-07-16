@@ -455,14 +455,21 @@ func TestRenderCaddyfileDefaults(t *testing.T) {
 		"health_uri /api/server-info",
 		"@api path /api/*",
 		`respond "" {err.status_code}`,
-		"copy_response 200", // メンテナンスの既定ステータス
-		"metrics",           // per-handlerメトリクス有効化
-		":9180 {",           // metrics専用リスナ
+		"root * /usr/share/caddy", // メンテページはproxy自身のfile_serverで配信
+		"rewrite * /maintenance.html",
+		"status 200", // メンテナンスの既定ステータス
+		`header Cache-Control "no-store"`,
+		"metrics", // per-handlerメトリクス有効化
+		":9180 {", // metrics専用リスナ
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("Caddyfile missing %q\n---\n%s", s, out)
 		}
+	}
+	// 統合後はmaintenance Serviceへのreverse_proxyを持たない
+	if strings.Contains(out, "example-maintenance") {
+		t.Errorf("Caddyfile must not proxy to the maintenance service:\n%s", out)
 	}
 	// Fix5: X-Forwarded-Protoを{scheme}で上書きしない
 	if strings.Contains(out, "X-Forwarded-Proto") {
@@ -483,8 +490,18 @@ func TestRenderCaddyfileClientIPAndStatus(t *testing.T) {
 	if !strings.Contains(out, "header_up X-Real-IP {header.CF-Connecting-IP}") {
 		t.Errorf("expected CF-Connecting-IP client IP header:\n%s", out)
 	}
-	if !strings.Contains(out, "copy_response 503") {
+	if !strings.Contains(out, "status 503") {
 		t.Errorf("expected configurable maintenance status 503:\n%s", out)
+	}
+}
+
+func TestRenderCaddyfileMaintenanceDisabled(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Proxy.Maintenance.Enabled = boolPtr(false)
+	out := renderCaddyfile(m)
+
+	if strings.Contains(out, "handle_errors") {
+		t.Errorf("maintenance disabled must omit handle_errors:\n%s", out)
 	}
 }
 
@@ -1294,15 +1311,26 @@ func TestMonitoringBuilders(t *testing.T) {
 func TestProxyMetricsPort(t *testing.T) {
 	m := newMisskey()
 	// proxyコンテナはmetricsポート(:9180)を公開
-	proxyPod := buildCaddyPodSpec(m, "Caddyfile", false, "proxy")
+	proxyPod := buildCaddyPodSpec(m, true)
 	if !hasContainerPort(proxyPod.Containers[0].Ports, proxyMetricsPort) {
 		t.Errorf("proxy container missing metrics port %d: %+v", proxyMetricsPort, proxyPod.Containers[0].Ports)
 	}
-	// maintenanceはmetricsポートを持たない
-	maintPod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true, "maintenance")
-	if hasContainerPort(maintPod.Containers[0].Ports, proxyMetricsPort) {
-		t.Errorf("maintenance container must not expose metrics port: %+v", maintPod.Containers[0].Ports)
+	// maintenance有効時のみHTML CMをマウント
+	if !hasVolume(proxyPod.Volumes, "maintenance-html") {
+		t.Errorf("proxy pod missing maintenance-html volume: %+v", proxyPod.Volumes)
 	}
+	if hasVolume(buildCaddyPodSpec(m, false).Volumes, "maintenance-html") {
+		t.Errorf("maintenance disabled must not mount maintenance-html")
+	}
+}
+
+func hasVolume(vols []corev1.Volume, name string) bool {
+	for _, v := range vols {
+		if v.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func hasContainerPort(ports []corev1.ContainerPort, p int32) bool {

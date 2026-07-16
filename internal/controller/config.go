@@ -231,12 +231,13 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 		w("\t\t\thandle @api {\n")
 		w("\t\t\t\trespond \"\" {err.status_code}\n")
 		w("\t\t\t}\n")
+		// メンテページはproxy自身のfile_serverで配信(既定200, /api/*は上記で実status)
 		w("\t\t\thandle {\n")
-		w(fmt.Sprintf("\t\t\t\treverse_proxy %s:%d {\n", nameMaintenance(m), proxyPort))
-		w("\t\t\t\t\thandle_response {\n")
-		w("\t\t\t\t\t\tcopy_response_headers\n")
-		w(fmt.Sprintf("\t\t\t\t\t\tcopy_response %d\n", status))
-		w("\t\t\t\t\t}\n")
+		w("\t\t\t\theader Cache-Control \"no-store\"\n")
+		w("\t\t\t\troot * /usr/share/caddy\n")
+		w("\t\t\t\trewrite * /maintenance.html\n")
+		w("\t\t\t\tfile_server {\n")
+		w(fmt.Sprintf("\t\t\t\t\tstatus %d\n", status))
 		w("\t\t\t\t}\n")
 		w("\t\t\t}\n")
 		w("\t\t}\n")
@@ -244,11 +245,6 @@ func renderCaddyfile(m *misskeyv1alpha1.Misskey) string {
 	}
 	w("}\n")
 	return b.String()
-}
-
-// 静的メンテナンスサーバのCaddyfileを生成
-func renderMaintenanceCaddyfile() string {
-	return fmt.Sprintf(":%d {\n\troot * /usr/share/caddy\n\ttry_files /maintenance.html\n\tfile_server\n\theader Cache-Control \"no-store\"\n}\n", proxyPort)
 }
 
 // spec.proxy.maintenance.htmlが空の時に配信するページを生成
@@ -290,7 +286,6 @@ func (r *MisskeyReconciler) reconcileConfigMaps(ctx context.Context, m *misskeyv
 		}
 		if boolOr(m.Spec.Proxy.Enabled, true) {
 			cm.Data["Caddyfile"] = renderCaddyfile(m)
-			cm.Data["maintenance.Caddyfile"] = renderMaintenanceCaddyfile()
 		}
 		return nil
 	}); err != nil {

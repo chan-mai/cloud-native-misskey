@@ -1058,7 +1058,7 @@ spec:
                     type: boolean
                   image:
                     default: caddy:2
-                    description: Image for the Caddy proxy and maintenance containers.
+                    description: Image for the Caddy proxy container.
                     type: string
                   maintenance:
                     description: Maintenance configures the fallback page served when
@@ -1066,7 +1066,8 @@ spec:
                     properties:
                       enabled:
                         default: true
-                        description: Enabled toggles the maintenance fallback Deployment.
+                        description: Enabled toggles the maintenance fallback page
+                          served by the proxy itself.
                         type: boolean
                       html:
                         description: HTML is the page body served during maintenance.

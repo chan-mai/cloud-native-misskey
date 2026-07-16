@@ -235,6 +235,28 @@ func TestOptOutCleanup(t *testing.T) {
 		t.Fatalf("create misskey: %v", err)
 	}
 
+	// 統合前構成の残骸を模擬(reconcileで掃除されること=アップグレード互換の回帰確認)
+	legacyDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: ns},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "legacy-maintenance"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "legacy-maintenance"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "caddy", Image: "caddy:2"}}},
+			},
+		},
+	}
+	if err := cl.Create(ctx, legacyDep); err != nil {
+		t.Fatalf("create legacy maintenance deployment: %v", err)
+	}
+	legacySvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: ns},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 8080}}},
+	}
+	if err := cl.Create(ctx, legacySvc); err != nil {
+		t.Fatalf("create legacy maintenance service: %v", err)
+	}
+
 	r := &MisskeyReconciler{Client: cl, Scheme: sch}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "oo", Namespace: ns}}
 	reconcile := func() {
@@ -266,8 +288,12 @@ func TestOptOutCleanup(t *testing.T) {
 			t.Errorf("%s未生成", name)
 		}
 	}
-	if !exists(ctx, cl, &appsv1.Deployment{}, nameMaintenance(m), ns) {
-		t.Error("maintenance Deployment未生成")
+	// 統合後はmaintenance Deployment/Serviceを作らず、legacy残骸も掃除される
+	if exists(ctx, cl, &appsv1.Deployment{}, nameMaintenance(m), ns) {
+		t.Error("legacy maintenance Deploymentが残存")
+	}
+	if exists(ctx, cl, &corev1.Service{}, nameMaintenance(m), ns) {
+		t.Error("legacy maintenance Serviceが残存")
 	}
 	if !exists(ctx, cl, &corev1.ConfigMap{}, nameMaintenanceHTML(m), ns) {
 		t.Error("maintenance HTML ConfigMap未生成")
@@ -276,15 +302,9 @@ func TestOptOutCleanup(t *testing.T) {
 		t.Error("Ingress未生成")
 	}
 
-	// maintenanceのみ無効化 → maintenance側だけ掃除、proxyは残る
+	// maintenanceのみ無効化 → HTML ConfigMapだけ掃除、proxyは残る
 	update(func(c *misskeyv1alpha1.Misskey) { c.Spec.Proxy.Maintenance.Enabled = boolPtr(false) })
 	reconcile()
-	if exists(ctx, cl, &appsv1.Deployment{}, nameMaintenance(m), ns) {
-		t.Error("maintenance無効化後もDeploymentが残存")
-	}
-	if exists(ctx, cl, &corev1.Service{}, nameMaintenance(m), ns) {
-		t.Error("maintenance無効化後もServiceが残存")
-	}
 	if exists(ctx, cl, &corev1.ConfigMap{}, nameMaintenanceHTML(m), ns) {
 		t.Error("maintenance無効化後もHTML ConfigMapが残存")
 	}

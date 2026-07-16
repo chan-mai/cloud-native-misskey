@@ -30,9 +30,9 @@ import (
 	misskeyv1alpha1 "github.com/chan-mai/cloudnative-misskey/api/v1alpha1"
 )
 
-// proxyとmaintenance Deployment共通のpod specを生成
+// proxy Deploymentのpod specを生成
 // Caddyは非rootで動くため、バイナリを書込可能なemptyDirにコピーし/dataと/configもemptyDirにする
-func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMaintenanceHTML bool, component string) corev1.PodSpec {
+func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, withMaintenanceHTML bool) corev1.PodSpec {
 	image := stringOr(m.Spec.Proxy.Image, "caddy:2")
 
 	volumes := []corev1.Volume{
@@ -50,7 +50,7 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 	}
 
 	mounts := []corev1.VolumeMount{
-		{Name: "caddy-config", MountPath: "/etc/caddy/Caddyfile", SubPath: caddyfileKey, ReadOnly: true},
+		{Name: "caddy-config", MountPath: "/etc/caddy/Caddyfile", SubPath: "Caddyfile", ReadOnly: true},
 		{Name: "caddy-data", MountPath: "/data"},
 		{Name: "caddy-config-tmp", MountPath: "/config"},
 		{Name: "caddy-bin", MountPath: "/caddy-bin"},
@@ -68,15 +68,14 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 		mounts = append(mounts, corev1.VolumeMount{Name: "maintenance-html", MountPath: "/usr/share/caddy", ReadOnly: true})
 	}
 
-	// proxyのみmetricsリスナ(:9180)を公開。maintenanceは対象外
-	ports := []corev1.ContainerPort{{ContainerPort: proxyPort}}
-	if component == "proxy" {
-		ports = append(ports, corev1.ContainerPort{Name: "metrics", ContainerPort: proxyMetricsPort})
+	ports := []corev1.ContainerPort{
+		{ContainerPort: proxyPort},
+		{Name: "metrics", ContainerPort: proxyMetricsPort},
 	}
 
 	return corev1.PodSpec{
 		SecurityContext:           nonRootPodSecurityContext(genericNonRootUID),
-		TopologySpreadConstraints: spreadConstraints(labelsFor(m, component)),
+		TopologySpreadConstraints: spreadConstraints(labelsFor(m, "proxy")),
 		InitContainers: []corev1.Container{
 			{
 				Name:            "prepare-caddy",
@@ -101,14 +100,19 @@ func buildCaddyPodSpec(m *misskeyv1alpha1.Misskey, caddyfileKey string, withMain
 	}
 }
 
-// proxyのService+Deploymentを作成/更新し、有効時はmaintenanceのService+Deploymentも扱う
+// proxyのService+Deploymentを作成/更新。メンテページはproxy自身のfile_serverが配信
 // proxy/maintenance無効化時は該当リソースを掃除(reconcileRedis等のopt-outパターンと同じ)
 func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	// 統合前の<name>-maintenance Deployment/Serviceをアップグレード互換のため常に掃除
+	if err := r.deleteLegacyMaintenanceWorkload(ctx, m); err != nil {
+		return err
+	}
+
 	if !boolOr(m.Spec.Proxy.Enabled, true) {
 		if err := r.deleteProxyResources(ctx, m); err != nil {
 			return err
 		}
-		return r.deleteMaintenanceResources(ctx, m)
+		return r.deleteMaintenanceHTMLConfigMap(ctx, m)
 	}
 
 	// proxy Service(port 80 -> 8080)
@@ -134,10 +138,16 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 		return err
 	}
 
+	maint := boolOr(m.Spec.Proxy.Maintenance.Enabled, true)
 	pdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameProxy(m), Namespace: m.Namespace}}
 	if err := r.apply(ctx, m, pdep, func() error {
-		pod := buildCaddyPodSpec(m, "Caddyfile", false, "proxy")
-		setDeployment(pdep, m, "proxy", replicasOr(m.Spec.Proxy.Replicas, 2), pod, checksumAnnotation(renderCaddyfile(m)))
+		pod := buildCaddyPodSpec(m, maint)
+		// maintenance有効時のみHTMLをchecksumに含め、無効時のhtml編集で無駄にロールさせない
+		parts := []string{renderCaddyfile(m)}
+		if maint {
+			parts = append(parts, maintenanceHTMLContent(m))
+		}
+		setDeployment(pdep, m, "proxy", replicasOr(m.Spec.Proxy.Replicas, 2), pod, checksumAnnotation(parts...))
 		return nil
 	}); err != nil {
 		return err
@@ -146,31 +156,10 @@ func (r *MisskeyReconciler) reconcileProxy(ctx context.Context, m *misskeyv1alph
 		return err
 	}
 
-	if !boolOr(m.Spec.Proxy.Maintenance.Enabled, true) {
-		return r.deleteMaintenanceResources(ctx, m)
+	if !maint {
+		return r.deleteMaintenanceHTMLConfigMap(ctx, m)
 	}
-
-	// maintenance Service(port 8080 -> 8080)
-	msvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}}
-	if err := r.apply(ctx, m, msvc, func() error {
-		msvc.Labels = labelsFor(m, "maintenance")
-		msvc.Spec.Selector = selectorFor(m, "maintenance")
-		msvc.Spec.Ports = []corev1.ServicePort{{
-			Name:       "http",
-			Port:       proxyPort,
-			TargetPort: intstr.FromInt32(proxyPort),
-		}}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	mdep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}}
-	return r.apply(ctx, m, mdep, func() error {
-		pod := buildCaddyPodSpec(m, "maintenance.Caddyfile", true, "maintenance")
-		setDeployment(mdep, m, "maintenance", int32Ptr(1), pod, checksumAnnotation(renderMaintenanceCaddyfile(), maintenanceHTMLContent(m)))
-		return nil
-	})
+	return nil
 }
 
 // deleteProxyResources: proxy無効化時のcleanup(Deployment/Service/PDB)
@@ -189,12 +178,12 @@ func (r *MisskeyReconciler) deleteProxyResources(ctx context.Context, m *misskey
 	return nil
 }
 
-// deleteMaintenanceResources: maintenance無効化時のcleanup(Deployment/Service/HTML ConfigMap)
-func (r *MisskeyReconciler) deleteMaintenanceResources(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+// deleteLegacyMaintenanceWorkload: 統合前構成のmaintenance Deployment/Serviceを掃除
+// CRのownerRefがありCR存続中はGCされないため明示削除(数リリース後に削除可)
+func (r *MisskeyReconciler) deleteLegacyMaintenanceWorkload(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
 	objs := []client.Object{
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenance(m), Namespace: m.Namespace}},
-		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenanceHTML(m), Namespace: m.Namespace}},
 	}
 	for _, o := range objs {
 		if err := r.deleteIfExists(ctx, o); err != nil {
@@ -202,4 +191,10 @@ func (r *MisskeyReconciler) deleteMaintenanceResources(ctx context.Context, m *m
 		}
 	}
 	return nil
+}
+
+// deleteMaintenanceHTMLConfigMap: maintenance/proxy無効化時のHTML ConfigMap掃除
+func (r *MisskeyReconciler) deleteMaintenanceHTMLConfigMap(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: nameMaintenanceHTML(m), Namespace: m.Namespace}}
+	return r.deleteIfExists(ctx, cm)
 }
