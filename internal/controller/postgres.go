@@ -35,6 +35,12 @@ var (
 	cnpgScheduledBackupGVK = schema.GroupVersionKind{
 		Group: "postgresql.cnpg.io", Version: "v1", Kind: "ScheduledBackup",
 	}
+	cnpgBackupGVK = schema.GroupVersionKind{
+		Group: "postgresql.cnpg.io", Version: "v1", Kind: "Backup",
+	}
+	cnpgBackupListGVK = schema.GroupVersionKind{
+		Group: "postgresql.cnpg.io", Version: "v1", Kind: "BackupList",
+	}
 	cnpgPoolerGVK = schema.GroupVersionKind{
 		Group: "postgresql.cnpg.io", Version: "v1", Kind: "Pooler",
 	}

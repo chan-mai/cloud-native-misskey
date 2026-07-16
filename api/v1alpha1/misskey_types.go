@@ -279,6 +279,13 @@ type MigrationSpec struct {
 	// index needing manual cleanup.
 	// +optional
 	CreateIndexConcurrently *bool `json:"createIndexConcurrently,omitempty"`
+
+	// PreBackup gates each new migration Job on an on-demand CNPG Backup of
+	// the database, so a failed one-way migration can be rolled back by
+	// restoring a new instance via postgres.recovery. Requires managed
+	// PostgreSQL with postgres.backup configured; otherwise it is a no-op.
+	// +optional
+	PreBackup *bool `json:"preBackup,omitempty"`
 }
 
 // NetworkSpec groups the instance's NetworkPolicy controls: ingress isolation

@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -122,6 +123,89 @@ func (r *MisskeyReconciler) reconcileMigration(ctx context.Context, m *misskeyv1
 		r.event(m, corev1.EventTypeWarning, "MigrationFailed", "Migrate", "migration Job %s failed (%d); delete the Job to retry with the same configuration", job.Name, job.Status.Failed)
 	}
 	return job.Status.Succeeded >= 1, nil
+}
+
+// preBackupEnabled: spec.migration.preBackupが有効か
+func preBackupEnabled(m *misskeyv1alpha1.Misskey) bool {
+	return m.Spec.Migration.PreBackup != nil && *m.Spec.Migration.PreBackup
+}
+
+// buildPreMigrationBackup: migration前のon-demand CNPG Backup
+func buildPreMigrationBackup(m *misskeyv1alpha1.Misskey) *unstructured.Unstructured {
+	b := &unstructured.Unstructured{}
+	b.SetGroupVersionKind(cnpgBackupGVK)
+	b.SetName(namePreBackup(m))
+	b.SetNamespace(m.Namespace)
+	b.SetLabels(labelsFor(m, "premigrate"))
+	b.Object["spec"] = map[string]any{
+		"cluster": map[string]any{"name": nameDB(m)},
+	}
+	return b
+}
+
+// reconcilePreMigrationBackup: migration Job作成前にon-demandバックアップの完了をgateする
+// 失敗したmigrationをpostgres.recoveryで巻き戻せる状態を担保する。戻り値はgate通過可否
+func (r *MisskeyReconciler) reconcilePreMigrationBackup(ctx context.Context, m *misskeyv1alpha1.Misskey, p plan) (bool, error) {
+	if !preBackupEnabled(m) || !p.dbManaged || m.Spec.Postgres.Backup == nil {
+		return true, nil
+	}
+	if err := r.cleanupOldPreMigrationBackups(ctx, m); err != nil {
+		return false, err
+	}
+	// 現行imageのmigration Jobが既にあればgateしない(導入前から進行中のmigrationを塞がない)
+	if err := r.Get(ctx, types.NamespacedName{Name: nameMigrate(m), Namespace: m.Namespace}, &batchv1.Job{}); err == nil {
+		return true, nil
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	backup := &unstructured.Unstructured{}
+	backup.SetGroupVersionKind(cnpgBackupGVK)
+	err := r.Get(ctx, types.NamespacedName{Name: namePreBackup(m), Namespace: m.Namespace}, backup)
+	if apierrors.IsNotFound(err) {
+		backup = buildPreMigrationBackup(m)
+		if err := controllerutil.SetControllerReference(m, backup, r.Scheme); err != nil {
+			return false, err
+		}
+		if err := r.Create(ctx, backup); err != nil {
+			return false, err
+		}
+		r.event(m, corev1.EventTypeNormal, "PreBackupStarted", "Migrate", "created pre-migration Backup %s (image %s)", backup.GetName(), m.Spec.Image)
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase")
+	switch phase {
+	case "completed":
+		return true, nil
+	case "failed":
+		// migration Job失敗時と同じセマンティクス, Backup削除で再試行
+		r.event(m, corev1.EventTypeWarning, "PreBackupFailed", "Migrate", "pre-migration Backup %s failed; delete it to retry", backup.GetName())
+		return false, nil
+	default:
+		return false, nil
+	}
+}
+
+// cleanupOldPreMigrationBackups: 現行image以外のpre-migration Backupを削除
+func (r *MisskeyReconciler) cleanupOldPreMigrationBackups(ctx context.Context, m *misskeyv1alpha1.Misskey) error {
+	var list unstructured.UnstructuredList
+	list.SetGroupVersionKind(cnpgBackupListGVK)
+	if err := r.List(ctx, &list, client.InNamespace(m.Namespace), client.MatchingLabels(selectorFor(m, "premigrate"))); err != nil {
+		return err
+	}
+	current := namePreBackup(m)
+	for i := range list.Items {
+		b := &list.Items[i]
+		if b.GetName() == current {
+			continue
+		}
+		if err := r.Delete(ctx, b); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // cleanupOldMigrationJobs: 現行image以外のmigration Jobを削除(古いmigrationは適用済みで不要)

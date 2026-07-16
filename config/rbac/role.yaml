@@ -153,6 +153,7 @@ rules:
 - apiGroups:
   - postgresql.cnpg.io
   resources:
+  - backups
   - clusters
   - poolers
   - scheduledbackups

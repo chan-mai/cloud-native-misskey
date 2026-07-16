@@ -204,6 +204,11 @@ func nameDBPoolerRO(m *misskeyv1alpha1.Misskey) string { return nameDB(m) + "-po
 // migration専用のconfig ConfigMap。migrationはprimary直結・no-replicationで別config
 func nameMigrateConfig(m *misskeyv1alpha1.Misskey) string { return m.Name + "-migrate-config" }
 
+// version-scopedなpre-migration Backup名。migration Jobと同じくimage変更で別Backup
+func namePreBackup(m *misskeyv1alpha1.Misskey) string {
+	return m.Name + "-premigrate-" + imageHash(m.Spec.Image)
+}
+
 // HA redisのrequirepass用にoperatorが生成するSecret(全managed HAインスタンス共通)
 func nameRedisAuthSecret(m *misskeyv1alpha1.Misskey) string { return m.Name + "-redis-auth" }
 

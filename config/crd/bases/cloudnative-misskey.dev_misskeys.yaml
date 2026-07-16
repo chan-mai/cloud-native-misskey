@@ -362,6 +362,13 @@ spec:
                       batch), slower index builds, and a failed concurrent build can leave an invalid
                       index needing manual cleanup.
                     type: boolean
+                  preBackup:
+                    description: |-
+                      PreBackup gates each new migration Job on an on-demand CNPG Backup of
+                      the database, so a failed one-way migration can be rolled back by
+                      restoring a new instance via postgres.recovery. Requires managed
+                      PostgreSQL with postgres.backup configured; otherwise it is a no-op.
+                    type: boolean
                 type: object
               monitoring:
                 description: |-

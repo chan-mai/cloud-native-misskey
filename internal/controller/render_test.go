@@ -1019,6 +1019,60 @@ func TestBuildDBClusterImport(t *testing.T) {
 	}
 }
 
+func TestBuildPreMigrationBackup(t *testing.T) {
+	m := newMisskey()
+	b := buildPreMigrationBackup(m)
+	if b.GetKind() != "Backup" || b.GetNamespace() != "ns" {
+		t.Errorf("backup identity wrong: %s/%s", b.GetKind(), b.GetName())
+	}
+	if b.GetName() != namePreBackup(m) || !strings.HasPrefix(b.GetName(), "example-premigrate-") {
+		t.Errorf("backup name: %s", b.GetName())
+	}
+	spec := b.Object["spec"].(map[string]any)
+	if spec["cluster"].(map[string]any)["name"] != "example-db" {
+		t.Errorf("cluster ref: %+v", spec)
+	}
+	if b.GetLabels()["app.kubernetes.io/component"] != "premigrate" {
+		t.Errorf("labels: %+v", b.GetLabels())
+	}
+	// image変更で別名(=別Backup)になる
+	m2 := newMisskey()
+	m2.Spec.Image = "misskey/misskey:other"
+	if namePreBackup(m2) == namePreBackup(m) {
+		t.Error("image変更でpre-backup名が変わらない")
+	}
+}
+
+func TestPreMigrationBackupGate(t *testing.T) {
+	r := &MisskeyReconciler{}
+	ctx := t.Context()
+	// 無効/バックアップ未設定/external DBはno-opでgate通過(clientに触れない)
+	cases := []struct {
+		name string
+		m    *misskeyv1alpha1.Misskey
+		p    plan
+	}{
+		{"preBackup無効", newMisskey(), plan{dbManaged: true}},
+		{"backup未設定", func() *misskeyv1alpha1.Misskey {
+			m := newMisskey()
+			m.Spec.Migration.PreBackup = boolPtr(true)
+			return m
+		}(), plan{dbManaged: true}},
+		{"external DB", func() *misskeyv1alpha1.Misskey {
+			m := newMisskey()
+			m.Spec.Migration.PreBackup = boolPtr(true)
+			m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{DestinationPath: "s3://b"}
+			return m
+		}(), plan{dbManaged: false}},
+	}
+	for _, tc := range cases {
+		ok, err := r.reconcilePreMigrationBackup(ctx, tc.m, tc.p)
+		if !ok || err != nil {
+			t.Errorf("%s: gate must pass as no-op, got ok=%v err=%v", tc.name, ok, err)
+		}
+	}
+}
+
 func TestBuildDBScheduledBackup(t *testing.T) {
 	m := newMisskey()
 	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{

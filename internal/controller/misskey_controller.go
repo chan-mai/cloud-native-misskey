@@ -86,7 +86,7 @@ func (r *MisskeyReconciler) event(m *misskeyv1alpha1.Misskey, eventType, reason,
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters;scheduledbackups;poolers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=clusters;scheduledbackups;backups;poolers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=redis.redis.opstreelabs.in,resources=redisreplications;redissentinels,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects;triggerauthentications,verbs=get;list;watch;create;update;patch;delete
@@ -361,9 +361,16 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 			return err
 		}
 	} else if r.databaseReady(ctx, m, p) {
-		complete, err := r.reconcileMigration(ctx, m, p)
+		// preBackup有効時はon-demandバックアップ完了まで新migrationをgate
+		backupDone, err := r.reconcilePreMigrationBackup(ctx, m, p)
 		if err != nil {
 			return err
+		}
+		complete := false
+		if backupDone {
+			if complete, err = r.reconcileMigration(ctx, m, p); err != nil {
+				return err
+			}
 		}
 		if complete {
 			// objectStorage設定をmetaへ投入(autoConfigure時)。書込完了までapp/workerをgate

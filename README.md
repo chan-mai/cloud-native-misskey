@@ -157,6 +157,7 @@ spec:
 | `postgres.recovery` | (なし) | 既存バックアップからのbootstrap復元(DR/移行)。CR作成時のみ有効・immutable。詳細は[バックアップからの復元](#バックアップからの復元drインスタンス移行) |
 | `postgres.import` | (なし) | 稼働中の外部PostgreSQLからの論理インポート(pg_dump/pg_restore)。CR作成時のみ有効・immutable。recoveryと排他 |
 | `migration.createIndexConcurrently` | `false` | `true`で`MISSKEY_MIGRATION_CREATE_INDEX_CONCURRENTLY=1`。note等の巨大表index作成の書込ロックを避ける(opt-in) |
+| `migration.preBackup` | `false` | image変更ごとのmigration前にon-demand CNPG Backupを取り、完了までmigrationをgate(opt-in)。失敗した一方向migrationを`postgres.recovery`で巻き戻せる状態を担保。managed DB+`postgres.backup`必須 |
 | `proxy.enabled` | `true` | Caddy proxyの有無 |
 | `ingress.className` | `nginx` | ingressClassName |
 | `network.isolation.enabled` | `true` | backend(app/worker/redis/meili)へのingressをintra-instanceに限る。公開入口(proxy)とpostgres(CNPGに委任)は対象外 |
