@@ -812,6 +812,22 @@ spec:
                           cluster does not overwrite the origin WAL archive.
                         maxLength: 255
                         type: string
+                      verify:
+                        description: |-
+                          Verify schedules periodic restore tests: a throwaway CNPG cluster is
+                          bootstrapped from the latest backup, checked for readiness and deleted.
+                          The outcome lands in status.backupVerification.
+                        properties:
+                          interval:
+                            default: 168h
+                            description: Interval between restore tests.
+                            type: string
+                          timeout:
+                            default: 30m
+                            description: Timeout for a single restore test before
+                              it is recorded as failed.
+                            type: string
+                        type: object
                     required:
                     - destinationPath
                     type: object
@@ -2917,6 +2933,25 @@ spec:
           status:
             description: MisskeyStatus defines the observed state of a Misskey instance.
             properties:
+              backupVerification:
+                description: |-
+                  BackupVerification is the outcome of the last scheduled restore test
+                  (postgres.backup.verify).
+                properties:
+                  lastVerifiedTime:
+                    description: LastVerifiedTime is when the last restore test finished.
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message carries failure details.
+                    type: string
+                  result:
+                    description: Result of the last restore test.
+                    enum:
+                    - Succeeded
+                    - Failed
+                    type: string
+                type: object
               conditions:
                 description: Conditions represent the latest available observations
                   of the instance state.

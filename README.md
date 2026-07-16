@@ -353,6 +353,22 @@ spec:
 - **`<name>-db`のCNPG Clusterが既に存在する場合、recoveryは無視されます**(既存クラスタをadoptするため)。`deletionPolicy: Retain`で残したClusterを同名CRで引き取る運用とは排他です。
 - CNPG 1.26でin-tree barmanObjectStoreはdeprecated(Barman Cloud Plugin推奨)。backup/recoveryのplugin移行は今後の課題です。
 
+### バックアップの定期復元検証 (`postgres.backup.verify`)
+
+バックアップは復元してみるまで有効性が分かりません。`verify`を設定すると、`interval`(既定168h)ごとに最新バックアップから使い捨てのCNPG Cluster(`<name>-db-verify`, 1インスタンス、WALアーカイブなし)を起こし、readyに到達したら破棄して結果を`status.backupVerification`に記録します。`timeout`(既定30m)内にreadyにならなければFailedとして記録されます。
+
+```yaml
+spec:
+  postgres:
+    backup:
+      destinationPath: s3://my-bucket/misskey/backups
+      verify:
+        interval: 168h
+        timeout: 30m
+```
+
+検証Clusterは復元検証専用で、`deletionPolicy: Retain`でも保持されません。ストレージは本体と同サイズのPVCを一時的に消費します。
+
 ### 稼働中DBからの論理インポート (`postgres.import`)
 
 バックアップを経由せず、稼働中の外部PostgreSQL(docker compose構成やRDS等)から直接移行する場合は`postgres.import`を使います。CNPGの`initdb.import`(microservice型)によるpg_dump/pg_restoreで、CR作成時にDBを丸ごと取り込みます。

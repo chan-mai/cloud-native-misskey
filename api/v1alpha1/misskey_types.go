@@ -1007,6 +1007,25 @@ type PostgresBackup struct {
 	// +kubebuilder:validation:MaxLength=255
 	// +optional
 	ServerName string `json:"serverName,omitempty"`
+
+	// Verify schedules periodic restore tests: a throwaway CNPG cluster is
+	// bootstrapped from the latest backup, checked for readiness and deleted.
+	// The outcome lands in status.backupVerification.
+	// +optional
+	Verify *BackupVerify `json:"verify,omitempty"`
+}
+
+// BackupVerify configures periodic restore tests of the backups.
+type BackupVerify struct {
+	// Interval between restore tests.
+	// +kubebuilder:default="168h"
+	// +optional
+	Interval metav1.Duration `json:"interval,omitempty"`
+
+	// Timeout for a single restore test before it is recorded as failed.
+	// +kubebuilder:default="30m"
+	// +optional
+	Timeout metav1.Duration `json:"timeout,omitempty"`
 }
 
 // PostgresRecovery bootstraps the managed CNPG cluster from an existing
@@ -1282,6 +1301,27 @@ type MisskeyStatus struct {
 	// providers.
 	// +optional
 	SearchIndex string `json:"searchIndex,omitempty"`
+
+	// BackupVerification is the outcome of the last scheduled restore test
+	// (postgres.backup.verify).
+	// +optional
+	BackupVerification *BackupVerificationStatus `json:"backupVerification,omitempty"`
+}
+
+// BackupVerificationStatus records the last restore test of the backups.
+type BackupVerificationStatus struct {
+	// LastVerifiedTime is when the last restore test finished.
+	// +optional
+	LastVerifiedTime metav1.Time `json:"lastVerifiedTime,omitempty"`
+
+	// Result of the last restore test.
+	// +kubebuilder:validation:Enum=Succeeded;Failed
+	// +optional
+	Result string `json:"result,omitempty"`
+
+	// Message carries failure details.
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // +kubebuilder:object:root=true

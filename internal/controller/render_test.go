@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1070,6 +1071,62 @@ func TestPreMigrationBackupGate(t *testing.T) {
 		if !ok || err != nil {
 			t.Errorf("%s: gate must pass as no-op, got ok=%v err=%v", tc.name, ok, err)
 		}
+	}
+}
+
+func TestBuildDBVerifyCluster(t *testing.T) {
+	m := newMisskey()
+	m.Spec.Postgres.Backup = &misskeyv1alpha1.PostgresBackup{
+		DestinationPath: "s3://bk/misskey",
+		EndpointURL:     "https://s3.example.com",
+		Verify:          &misskeyv1alpha1.BackupVerify{},
+	}
+	vc := buildDBVerifyCluster(m)
+
+	if vc.GetName() != "example-db-verify" || vc.GetKind() != "Cluster" {
+		t.Errorf("verify cluster identity wrong: %s/%s", vc.GetKind(), vc.GetName())
+	}
+	spec := vc.Object["spec"].(map[string]any)
+	if spec["instances"] != int64(1) {
+		t.Errorf("instances: %v", spec["instances"])
+	}
+	// 自前バックアップからのrecovery bootstrap、backupセクションなし(WALアーカイブ衝突防止)
+	rec := spec["bootstrap"].(map[string]any)["recovery"].(map[string]any)
+	if rec["source"] != "origin" {
+		t.Errorf("recovery source: %+v", rec)
+	}
+	if _, ok := spec["backup"]; ok {
+		t.Error("verify cluster must not archive WALs")
+	}
+	barman := spec["externalClusters"].([]any)[0].(map[string]any)["barmanObjectStore"].(map[string]any)
+	// serverName未指定時は本体クラスタ名のフォルダから復元
+	if barman["serverName"] != "example-db" || barman["destinationPath"] != "s3://bk/misskey" {
+		t.Errorf("barmanObjectStore: %+v", barman)
+	}
+	if vc.GetLabels()["app.kubernetes.io/component"] != "postgres-verify" {
+		t.Errorf("labels: %+v", vc.GetLabels())
+	}
+
+	// backup.serverName指定時はそれを復元元にする
+	m.Spec.Postgres.Backup.ServerName = "renamed"
+	barman = buildDBVerifyCluster(m).Object["spec"].(map[string]any)["externalClusters"].([]any)[0].(map[string]any)["barmanObjectStore"].(map[string]any)
+	if barman["serverName"] != "renamed" {
+		t.Errorf("serverName override: %+v", barman)
+	}
+}
+
+func TestBackupVerifyDue(t *testing.T) {
+	now := metav1.Now()
+	m := newMisskey()
+	if !backupVerifyDue(m, time.Hour, now.Time) {
+		t.Error("初回は即due")
+	}
+	m.Status.BackupVerification = &misskeyv1alpha1.BackupVerificationStatus{LastVerifiedTime: now}
+	if backupVerifyDue(m, time.Hour, now.Time.Add(30*time.Minute)) {
+		t.Error("interval未満でdueになった")
+	}
+	if !backupVerifyDue(m, time.Hour, now.Time.Add(2*time.Hour)) {
+		t.Error("interval超過でdueにならない")
 	}
 }
 

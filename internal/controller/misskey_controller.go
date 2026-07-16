@@ -334,6 +334,9 @@ func (r *MisskeyReconciler) reconcileAll(ctx context.Context, m *misskeyv1alpha1
 		if err := r.reconcilePoolers(ctx, m); err != nil {
 			return err
 		}
+		if err := r.reconcileBackupVerify(ctx, m); err != nil {
+			return err
+		}
 	}
 	// 常に呼ぶ(managed provisioning + external化/role削除/mode切替のcleanup)
 	if err := r.reconcileRedis(ctx, m); err != nil {

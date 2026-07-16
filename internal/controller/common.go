@@ -191,6 +191,9 @@ func imageHash(image string) string {
 	return hex.EncodeToString(h[:])[:10]
 }
 
+// バックアップ復元検証用の使い捨てCNPG Cluster名
+func nameDBVerify(m *misskeyv1alpha1.Misskey) string { return nameDB(m) + "-verify" }
+
 // CNPGが生成するクラスタのread-writeサービス
 func nameDBService(m *misskeyv1alpha1.Misskey) string { return nameDB(m) + "-rw" }
 
