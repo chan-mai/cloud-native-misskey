@@ -286,7 +286,7 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 				Ports:           []corev1.ContainerPort{{ContainerPort: redisPort}},
 				ReadinessProbe:  redisPingProbe(10),
 				LivenessProbe:   redisPingProbe(20),
-				VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+				VolumeMounts:    []corev1.VolumeMount{{Name: "data", MountPath: "/data"}, tmpMount()},
 			},
 		}
 		// monitoring時はredis_exporter sidecar(requirepassをREDIS_PASSWORDで認証)
@@ -294,8 +294,10 @@ func (r *MisskeyReconciler) reconcileRedisStandalone(ctx context.Context, m *mis
 			containers = append(containers, redisExporterContainer(m))
 		}
 		sts.Spec.Template.Spec = corev1.PodSpec{
-			SecurityContext: nonRootPodSecurityContext(redisUID),
-			Containers:      containers,
+			AutomountServiceAccountToken: boolPtr(false),
+			SecurityContext:              nonRootPodSecurityContext(redisUID),
+			Containers:                   containers,
+			Volumes:                      []corev1.Volume{tmpVolume()},
 		}
 		sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
 			{

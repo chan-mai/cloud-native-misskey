@@ -51,13 +51,14 @@ func (r *MisskeyReconciler) reconcileMeiliSecret(ctx context.Context, m *misskey
 		if secret.Data == nil {
 			secret.Data = map[string][]byte{}
 		}
-		if _, ok := secret.Data[meiliMasterKeyID]; !ok {
+		if _, ok := secret.Data[meiliMasterKeyID]; !ok || rotationRequested(m, secret) {
 			key, err := randomHex(32)
 			if err != nil {
 				return err
 			}
 			secret.Data[meiliMasterKeyID] = []byte(key)
 		}
+		markRotation(m, secret)
 		return nil
 	})
 }
@@ -99,7 +100,9 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 			meiliEnv = append(meiliEnv, corev1.EnvVar{Name: "MEILI_EXPERIMENTAL_ENABLE_METRICS", Value: "true"})
 		}
 		sts.Spec.Template.Spec = corev1.PodSpec{
-			SecurityContext: nonRootPodSecurityContext(genericNonRootUID),
+			AutomountServiceAccountToken: boolPtr(false),
+			SecurityContext:              nonRootPodSecurityContext(genericNonRootUID),
+			Volumes:                      []corev1.Volume{tmpVolume()},
 			Containers: []corev1.Container{
 				{
 					Name:            "meilisearch",
@@ -124,7 +127,7 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 					},
 					// subPathでデータをvolumeルート外に置く
 					// volumeルートにext4のlost+foundがあるとMeiliSearchがDBバージョンを推定できず失敗するため
-					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/meili_data", SubPath: "data"}},
+					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/meili_data", SubPath: "data"}, tmpMount()},
 				},
 			},
 		}

@@ -50,6 +50,24 @@ func checksumAnnotation(parts ...string) map[string]string {
 // 参照集合はrenderInitEnvと同一。値でなくresourceVersion基準なのは、annotation経由の
 // 低エントロピーパスワードのオフライン総当りを避けるため
 func (r *MisskeyReconciler) referencedSecretVersions(ctx context.Context, m *misskeyv1beta1.Misskey, p plan) []string {
+	names := referencedSecretNames(p)
+	out := make([]string, 0, len(names))
+	for name := range names {
+		version := "missing"
+		s := &corev1.Secret{}
+		// SecretはClientキャッシュ無効(DisableFor)のためAPI直読(RBAC getのみで可)
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, s); err == nil {
+			version = s.ResourceVersion
+		}
+		out = append(out, name+":"+version)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// referencedSecretNames: 描画済みconfigが参照する全Secret名の集合(値でなく名前のみ)
+// Secret watchの絞り込み(参照Secretのみreconcile)にも使う
+func referencedSecretNames(p plan) map[string]bool {
 	names := map[string]bool{p.dbPassSel.Name: true}
 	if p.meiliEnabled {
 		names[p.meiliKeySel.Name] = true
@@ -65,17 +83,32 @@ func (r *MisskeyReconciler) referencedSecretVersions(ctx context.Context, m *mis
 	if p.setupEnabled {
 		names[p.setupSel.Name] = true
 	}
-	out := make([]string, 0, len(names))
-	for name := range names {
-		version := "missing"
-		s := &corev1.Secret{}
-		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, s); err == nil {
-			version = s.ResourceVersion
-		}
-		out = append(out, name+":"+version)
+	return names
+}
+
+// rotateAnnotation: CRに付与するとoperator生成Secret(setup/meili/redis-auth)を再生成する
+// 値を変えるたびに新しい乱数へローテーション。config-checksum経由でpodがローリングし新値を取り込む
+const rotateAnnotation = "cloudnative-misskey.dev/rotate"
+
+// rotationRequested: CRのrotate指示値が既存secretの記録と異なれば再生成すべき
+func rotationRequested(m *misskeyv1beta1.Misskey, secret *corev1.Secret) bool {
+	want := m.Annotations[rotateAnnotation]
+	if want == "" {
+		return false
 	}
-	sort.Strings(out)
-	return out
+	return secret.Annotations[rotateAnnotation] != want
+}
+
+// markRotation: 再生成後にsecretへrotate指示値を記録
+func markRotation(m *misskeyv1beta1.Misskey, secret *corev1.Secret) {
+	want := m.Annotations[rotateAnnotation]
+	if want == "" {
+		return
+	}
+	if secret.Annotations == nil {
+		secret.Annotations = map[string]string{}
+	}
+	secret.Annotations[rotateAnnotation] = want
 }
 
 // インスタンス全体で使う既知のポート番号
@@ -295,11 +328,22 @@ func nonRootPodSecurityContext(uid int64) *corev1.PodSecurityContext {
 }
 
 // 堅牢なcontainerレベルのsecurityContext
+// readOnlyRootFilesystemはコンテナのrootfsをread-onlyにする。書込先はemptyDir(/tmp等)へ退避
 func restrictedContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: boolPtr(false),
+		ReadOnlyRootFilesystem:   boolPtr(true),
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
+}
+
+// tmpVolume/tmpMount: readOnlyRootFilesystem下で/tmpを書込可能にするemptyDir
+func tmpVolume() corev1.Volume {
+	return corev1.Volume{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
+}
+
+func tmpMount() corev1.VolumeMount {
+	return corev1.VolumeMount{Name: "tmp", MountPath: "/tmp"}
 }
 
 // レプリカをノード間にbest-effortで分散
