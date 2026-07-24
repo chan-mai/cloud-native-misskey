@@ -24,6 +24,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,20 +50,34 @@ func checksumAnnotation(parts ...string) map[string]string {
 // checksumAnnotationに混ぜてSecret値のローテーションでpodをローリングさせる(不在はname:missing)
 // 参照集合はrenderInitEnvと同一。値でなくresourceVersion基準なのは、annotation経由の
 // 低エントロピーパスワードのオフライン総当りを避けるため
-func (r *MisskeyReconciler) referencedSecretVersions(ctx context.Context, m *misskeyv1beta1.Misskey, p plan) []string {
+func (r *MisskeyReconciler) referencedSecretVersions(ctx context.Context, m *misskeyv1beta1.Misskey, p plan) ([]string, error) {
 	names := referencedSecretNames(p)
 	out := make([]string, 0, len(names))
 	for name := range names {
-		version := "missing"
-		s := &corev1.Secret{}
-		// SecretはClientキャッシュ無効(DisableFor)のためAPI直読(RBAC getのみで可)
-		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: m.Namespace}, s); err == nil {
-			version = s.ResourceVersion
+		v, err := r.secretVersion(ctx, m.Namespace, name)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, name+":"+version)
+		out = append(out, v)
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
+}
+
+// secretVersion: "name:resourceVersion"を返す。不在(NotFound)のみ"name:missing"、
+// その他のerror(Forbidden/API障害等)は伝播する。transientなerrorを"missing"にすると
+// checksumが変わってワークロードを不要にroll→復旧時に再rollするため、呼び出し元でreconcileをretryさせる
+func (r *MisskeyReconciler) secretVersion(ctx context.Context, ns, name string) (string, error) {
+	s := &corev1.Secret{}
+	// SecretはClientキャッシュ無効(DisableFor)のためAPI直読(RBAC getのみで可)
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, s)
+	if err == nil {
+		return name + ":" + s.ResourceVersion, nil
+	}
+	if apierrors.IsNotFound(err) {
+		return name + ":missing", nil
+	}
+	return "", err
 }
 
 // referencedSecretNames: 描画済みconfigが参照する全Secret名の集合(値でなく名前のみ)

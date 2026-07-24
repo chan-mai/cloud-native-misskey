@@ -36,10 +36,14 @@ import (
 // migrationChecksum: migration Jobの入力checksum annotation
 // migrate config本文+concurrently flag+参照Secret版数。認証情報ローテで失敗Jobも作り直される
 // image変更はJob名(imageHash)で別Jobになるため含めない
-func (r *MisskeyReconciler) migrationChecksum(ctx context.Context, m *misskeyv1beta1.Misskey, p plan) map[string]string {
+func (r *MisskeyReconciler) migrationChecksum(ctx context.Context, m *misskeyv1beta1.Misskey, p plan) (map[string]string, error) {
+	versions, err := r.referencedSecretVersions(ctx, m, p)
+	if err != nil {
+		return nil, err
+	}
 	parts := []string{renderDefaultYML(m, migratePlan(m, p)), strconv.FormatBool(migrationConcurrentIndexes(m))}
-	parts = append(parts, r.referencedSecretVersions(ctx, m, p)...)
-	return checksumAnnotation(parts...)
+	parts = append(parts, versions...)
+	return checksumAnnotation(parts...), nil
 }
 
 // buildMigrationJob: `pnpm run migrate`を1回だけ実行するJob。app/workerと同じinit/volumeを流用
@@ -92,9 +96,12 @@ func (r *MisskeyReconciler) reconcileMigration(ctx context.Context, m *misskeyv1
 	if err := r.cleanupOldMigrationJobs(ctx, m); err != nil {
 		return false, err
 	}
-	checksum := r.migrationChecksum(ctx, m, p)
+	checksum, err := r.migrationChecksum(ctx, m, p)
+	if err != nil {
+		return false, err
+	}
 	job := &batchv1.Job{}
-	err := r.Get(ctx, types.NamespacedName{Name: nameMigrate(m), Namespace: m.Namespace}, job)
+	err = r.Get(ctx, types.NamespacedName{Name: nameMigrate(m), Namespace: m.Namespace}, job)
 	if apierrors.IsNotFound(err) {
 		job = buildMigrationJob(m, p, checksum)
 		if err := controllerutil.SetControllerReference(m, job, r.Scheme); err != nil {

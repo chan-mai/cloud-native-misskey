@@ -89,6 +89,12 @@ func (r *MisskeyReconciler) reconcileMeilisearch(ctx context.Context, m *misskey
 		sts.Spec.Replicas = int32Ptr(1)
 		sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorFor(m, "meilisearch")}
 		sts.Spec.Template.Labels = labelsFor(m, "meilisearch")
+		// master keyのローテーション(値変化=resourceVersion変化)でpodをrollし新keyを取り込む
+		ver, err := r.secretVersion(ctx, m.Namespace, p.meiliKeySel.Name)
+		if err != nil {
+			return err
+		}
+		sts.Spec.Template.Annotations = checksumAnnotation(ver)
 		meiliEnv := []corev1.EnvVar{
 			secretEnv("MEILI_MASTER_KEY", p.meiliKeySel),
 			{Name: "MEILI_ENV", Value: "production"},
