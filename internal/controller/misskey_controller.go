@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -70,12 +71,18 @@ func (r *MisskeyReconciler) driftInterval() time.Duration {
 }
 
 // truncateMsg: Event/statusメッセージ長の上限。過大なエラー全文によるAPI負荷/可読性劣化を防ぐ
+// 接尾辞込みで上限内に収め、UTF-8のマルチバイト境界で切らない
 func truncateMsg(s string) string {
 	const max = 1024
-	if len(s) > max {
-		return s[:max] + "…(truncated)"
+	if len(s) <= max {
+		return s
 	}
-	return s
+	const suffix = "…(truncated)"
+	cut := max - len(suffix)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + suffix
 }
 
 // event: Recorder配線時のみEventを発行(テスト等の未配線ではno-op)
@@ -95,7 +102,8 @@ func (r *MisskeyReconciler) event(m *misskeyv1beta1.Misskey, eventType, reason, 
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;persistentvolumeclaims;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
 // Secretはwatch/Ownsせずname指定getのみ(cluster全Secretのlist/watch権限を持たない)
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create;update;patch;delete
+// operatorはSecretを削除しないためdeleteも付与しない(生成SecretのcleanupはownerRef GCに委ねる)
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete

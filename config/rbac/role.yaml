@@ -41,7 +41,6 @@ rules:
   - secrets
   verbs:
   - create
-  - delete
   - get
   - patch
   - update
