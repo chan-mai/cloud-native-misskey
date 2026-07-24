@@ -136,16 +136,50 @@ func (v *MisskeyCustomValidator) ValidateDelete(_ context.Context, _ *misskeyv1b
 	return nil, nil
 }
 
+// specImages: CRから指定できる全imageを fieldPath→image で返す(空は除外)
+// レンダリング前の共通検証で、許可リストを全image入力へ適用するため
+func specImages(m *misskeyv1beta1.Misskey) map[string]string {
+	out := map[string]string{}
+	add := func(path, img string) {
+		if img != "" {
+			out[path] = img
+		}
+	}
+	add("spec.image", m.Spec.Image)
+	add("spec.proxy.image", m.Spec.Proxy.Image)
+	add("spec.postgres.image", m.Spec.Postgres.Image)
+	add("spec.redis.image", m.Spec.Redis.Image)
+	if ha := m.Spec.Redis.HA; ha != nil {
+		add("spec.redis.ha.image", ha.Image)
+		add("spec.redis.ha.sentinelImage", ha.SentinelImage)
+	}
+	if roles := m.Spec.Redis.Roles; roles != nil {
+		for name, role := range map[string]*misskeyv1beta1.RedisRole{
+			"jobQueue": roles.JobQueue, "pubsub": roles.Pubsub,
+			"timelines": roles.Timelines, "reactions": roles.Reactions,
+		} {
+			if role != nil && role.HA != nil {
+				add("spec.redis.roles."+name+".ha.image", role.HA.Image)
+				add("spec.redis.roles."+name+".ha.sentinelImage", role.HA.SentinelImage)
+			}
+		}
+	}
+	add("spec.search.meilisearch.image", m.Spec.Search.Meilisearch.Image)
+	if os := m.Spec.ObjectStorage; os != nil {
+		add("spec.objectStorage.image", os.Image)
+	}
+	add("spec.monitoring.redisExporterImage", m.Spec.Monitoring.RedisExporterImage)
+	return out
+}
+
 // validate: 許可リスト違反をfield errorで拒否
 func (v *MisskeyCustomValidator) validate(m *misskeyv1beta1.Misskey) error {
 	var errs field.ErrorList
-	if !imageAllowed(m.Spec.Image, v.AllowedImageRegistries) {
-		errs = append(errs, field.Invalid(field.NewPath("spec", "image"), m.Spec.Image,
-			"image registry is not in the allowed list (--allowed-image-registries)"))
-	}
-	if os := m.Spec.ObjectStorage; os != nil && !imageAllowed(os.Image, v.AllowedImageRegistries) {
-		errs = append(errs, field.Invalid(field.NewPath("spec", "objectStorage", "image"), os.Image,
-			"image registry is not in the allowed list (--allowed-image-registries)"))
+	for path, img := range specImages(m) {
+		if !imageAllowed(img, v.AllowedImageRegistries) {
+			errs = append(errs, field.Invalid(field.NewPath(path), img,
+				"image registry is not in the allowed list (--allowed-image-registries)"))
+		}
 	}
 	// ClusterIssuer参照のみ許可リスト適用(namespaced Issuerは同一namespace内で対象外)
 	if ref := m.Spec.Ingress.IssuerRef; ref != nil && ref.Kind != "Issuer" && !nameAllowed(ref.Name, v.AllowedClusterIssuers) {

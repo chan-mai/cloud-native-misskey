@@ -80,6 +80,23 @@ func TestValidateImageAllowlist(t *testing.T) {
 	if _, err := (&MisskeyCustomValidator{}).ValidateCreate(context.Background(), base()); err != nil {
 		t.Errorf("empty allowlist must allow any: %v", err)
 	}
+	// spec.image以外(proxy/postgres/redis HA/meili等)も許可リスト対象
+	for _, tc := range []func(*misskeyv1beta1.Misskey){
+		func(x *misskeyv1beta1.Misskey) { x.Spec.Proxy.Image = "evil/caddy:2" },
+		func(x *misskeyv1beta1.Misskey) { x.Spec.Postgres.Image = "evil/pg:16" },
+		func(x *misskeyv1beta1.Misskey) { x.Spec.Redis.Image = "evil/redis:8" },
+		func(x *misskeyv1beta1.Misskey) {
+			x.Spec.Redis.HA = &misskeyv1beta1.RedisHA{Image: "evil/redis:8"}
+		},
+		func(x *misskeyv1beta1.Misskey) { x.Spec.Search.Meilisearch.Image = "evil/meili:v1" },
+	} {
+		mm := base()
+		mm.Spec.Image = "ghcr.io/trusted/misskey:x"
+		tc(mm)
+		if _, err := v.ValidateCreate(context.Background(), mm); err == nil {
+			t.Error("non-spec.image field outside allowlist must be rejected")
+		}
+	}
 }
 
 func TestValidateClusterIssuerAllowlist(t *testing.T) {
